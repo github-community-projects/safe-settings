@@ -106,6 +106,7 @@ describe('retrieveSettingsFromOrgs', () => {
   let mockRobot
 
   beforeEach(() => {
+    jest.clearAllMocks()
     mockRobot = createMockRobot()
   })
 
@@ -116,7 +117,63 @@ describe('retrieveSettingsFromOrgs', () => {
     // Assert that the result is an empty array
     expect(result).toEqual([])
   })
-  // Additional tests can be added here to cover error handling, file import, etc.
+
+  it('should skip creating a branch and PR when imported files match the base tree', async () => {
+    const { getInstallations } = require('../../../lib/installationCache')
+    const baseTreeSha = 'base-tree-sha'
+    const mockGithubHub = {
+      rest: {
+        git: {
+          getRef: jest.fn().mockResolvedValue({ data: { object: { sha: 'base-commit-sha' } } }),
+          getCommit: jest.fn().mockResolvedValue({ data: { tree: { sha: baseTreeSha } } }),
+          createTree: jest.fn().mockResolvedValue({ data: { sha: baseTreeSha } }),
+          createRef: jest.fn(),
+          createCommit: jest.fn(),
+          updateRef: jest.fn()
+        },
+        repos: {
+          getContent: jest.fn().mockRejectedValue({ status: 404 })
+        },
+        pulls: {
+          create: jest.fn()
+        }
+      }
+    }
+    const mockGithubSource = {
+      rest: {
+        git: {
+          getRef: jest.fn().mockResolvedValue({ data: { object: { sha: 'source-sha' } } })
+        }
+      },
+      repos: {
+        getContent: jest.fn()
+          .mockResolvedValueOnce({ data: [{ type: 'file', path: '.github/settings.yml' }] })
+          .mockResolvedValueOnce({
+            data: {
+              path: '.github/settings.yml',
+              content: Buffer.from('repository:\n  name: unchanged').toString('base64'),
+              encoding: 'base64'
+            }
+          })
+      }
+    }
+
+    getInstallations.mockResolvedValue([
+      { id: 1, account: { login: 'test-org' } },
+      { id: 2, account: { login: 'source-org' } }
+    ])
+    mockRobot.auth
+      .mockResolvedValueOnce(mockGithubHub)
+      .mockResolvedValueOnce(mockGithubSource)
+
+    const result = await retrieveSettingsFromOrgs(mockRobot, ['source-org'])
+
+    expect(result).toEqual([{ org: 'source-org', status: 'skipped', reason: 'no_changes' }])
+    expect(mockGithubHub.rest.git.createRef).not.toHaveBeenCalled()
+    expect(mockGithubHub.rest.git.createCommit).not.toHaveBeenCalled()
+    expect(mockGithubHub.rest.git.updateRef).not.toHaveBeenCalled()
+    expect(mockGithubHub.rest.pulls.create).not.toHaveBeenCalled()
+  })
 })
 
 // --- Unit tests for loadAndMergeSettings ---
