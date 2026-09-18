@@ -32,6 +32,11 @@ describe('env', () => {
       const FULL_SYNC_NOP = envTest.FULL_SYNC_NOP
       expect(FULL_SYNC_NOP).toEqual(false)
     })
+
+    it('loads default PR_COMMENT_SUMMARY_ENABLED if not passed', () => {
+      const PR_COMMENT_SUMMARY_ENABLED = envTest.PR_COMMENT_SUMMARY_ENABLED
+      expect(PR_COMMENT_SUMMARY_ENABLED).toEqual('false')
+    })
   })
 
   describe('load override values', () => {
@@ -43,6 +48,7 @@ describe('env', () => {
       process.env.DEPLOYMENT_CONFIG_FILE = 'safe-settings-deployment.yml'
       process.env.CREATE_PR_COMMENT = 'false'
       process.env.FULL_SYNC_NOP = false
+      process.env.PR_COMMENT_SUMMARY_ENABLED = 'true'
     })
 
     it('loads override values if passed', () => {
@@ -59,6 +65,8 @@ describe('env', () => {
       expect(CREATE_PR_COMMENT).toEqual('false')
       const FULL_SYNC_NOP = envTest.FULL_SYNC_NOP
       expect(FULL_SYNC_NOP).toEqual(false)
+      const PR_COMMENT_SUMMARY_ENABLED = envTest.PR_COMMENT_SUMMARY_ENABLED
+      expect(PR_COMMENT_SUMMARY_ENABLED).toEqual('true')
     })
   })
 })

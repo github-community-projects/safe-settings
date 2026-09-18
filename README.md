@@ -545,6 +545,10 @@ You can pass environment variables; the easiest way to do it is via a `.env` fil
   ```
   ENABLE_PR_COMMENT=true
   ```
+1. Add a repos-considered/affected/errors/plugins-affected summary line, a link to the check run, and a review-verification checkbox to the pull request comment using `PR_COMMENT_SUMMARY_ENABLED` (default is `false`). For e.g.
+  ```
+  PR_COMMENT_SUMMARY_ENABLED=true
+  ```
 1. Block repository renaming manually using `BLOCK_REPO_RENAME_BY_HUMAN` (default is `false`). For e.g.
   ```
   BLOCK_REPO_RENAME_BY_HUMAN=true

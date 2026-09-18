@@ -715,4 +715,89 @@ repository:
       expect(mockRepoSync).toHaveBeenCalledTimes(1)
     })
   }) // updateRepos - archived repo skipping
+
+  describe('handleResults - PR comment summary line', () => {
+    function changeResult (repo) {
+      return {
+        type: 'INFO',
+        plugin: 'Repository',
+        repo,
+        action: { additions: {}, deletions: {}, modifications: { name: repo } }
+      }
+    }
+
+    function createSettingsWithSummaryEnabled (config) {
+      jest.resetModules()
+      process.env.PR_COMMENT_SUMMARY_ENABLED = 'true'
+      const SettingsWithSummaryEnabled = require('../../../lib/settings')
+      delete process.env.PR_COMMENT_SUMMARY_ENABLED
+      jest.resetModules()
+
+      return new SettingsWithSummaryEnabled(true, stubContext, mockRepo, config, mockRef, mockSubOrg)
+    }
+
+    beforeEach(() => {
+      stubContext.payload.check_run = {
+        id: 1,
+        html_url: 'https://github.com/test/test-repo/runs/1',
+        check_suite: { pull_requests: [{ number: 42 }] }
+      }
+      stubContext.payload.repository = { owner: { login: 'test' }, name: 'test-repo' }
+      stubContext.octokit.rest.issues = {
+        createComment: jest.fn().mockResolvedValue({})
+      }
+      stubContext.octokit.rest.checks = {
+        update: jest.fn().mockResolvedValue({})
+      }
+    })
+
+    it('omits the summary stats line, check-run link, and checkbox by default', async () => {
+      const settings = createSettings({})
+      settings.nop = true
+      settings.results = [changeResult('test-repo')]
+
+      await settings.handleResults()
+
+      const body = stubContext.octokit.rest.issues.createComment.mock.calls[0][0].body
+      expect(body).not.toContain('Repos considered:')
+      expect(body).not.toContain('https://github.com/test/test-repo/runs/1')
+      expect(body).not.toContain('I have reviewed the changes')
+    })
+
+    it('includes the summary stats line and check-run link when PR_COMMENT_SUMMARY_ENABLED=true', async () => {
+      const settings = createSettingsWithSummaryEnabled({})
+      settings.results = [changeResult('test-repo')]
+
+      await settings.handleResults()
+
+      const body = stubContext.octokit.rest.issues.createComment.mock.calls[0][0].body
+      expect(body).toContain('**Repos considered:** 1 · **Repos affected:** 1 · **Errors:** 0 · **Plugins affected:** Repository')
+      expect(body).toContain('View the full per-repo breakdown: https://github.com/test/test-repo/runs/1')
+    })
+
+    it('appends the review-verification checkbox after the summary when PR_COMMENT_SUMMARY_ENABLED=true', async () => {
+      const settings = createSettingsWithSummaryEnabled({})
+      settings.results = [changeResult('test-repo')]
+
+      await settings.handleResults()
+
+      const body = stubContext.octokit.rest.issues.createComment.mock.calls[0][0].body
+      expect(body.endsWith('\n\n- [ ] I have reviewed the changes and verified that they are intended.')).toBe(true)
+    })
+
+    it('keeps the checkbox after the truncation marker when the diff is huge', async () => {
+      const settings = createSettingsWithSummaryEnabled({})
+      settings.results = Array.from({ length: 500 }, (_, index) => ({
+        type: 'INFO',
+        plugin: 'Repository',
+        repo: `test-repo-${index}`,
+        action: { additions: {}, deletions: {}, modifications: { name: `test-repo-${index}`, description: 'x'.repeat(200) } }
+      }))
+
+      await settings.handleResults()
+
+      const body = stubContext.octokit.rest.issues.createComment.mock.calls[0][0].body
+      expect(body).toContain('... (too many changes to report)\n\n- [ ] I have reviewed the changes and verified that they are intended.')
+    })
+  })
 }) // Settings Tests
