@@ -545,7 +545,7 @@ You can pass environment variables; the easiest way to do it is via a `.env` fil
   ```
   CREATE_PR_COMMENT=true
   ```
-1. Minimize the previous safe-settings PR comment as outdated before posting a new one, so only a single comment is visible per PR, using `PR_COMMENT_DEDUPE_ENABLED` (default is `false`). For e.g.
+1. Minimize the previous safe-settings PR comment as outdated after posting a new one, so only a single comment is visible per PR, using `PR_COMMENT_DEDUPE_ENABLED` (default is `false`). For e.g.
   ```
   PR_COMMENT_DEDUPE_ENABLED=true
   ```

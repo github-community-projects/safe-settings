@@ -889,5 +889,18 @@ repository:
       const minimizeOrder = stubContext.octokit.graphql.mock.invocationCallOrder[0]
       expect(createOrder).toBeLessThan(minimizeOrder)
     })
+
+    it('breaks ties on identical created_at by preferring the higher id, regardless of array order', async () => {
+      stubContext.octokit.paginate.mockResolvedValue([
+        { id: 10, node_id: 'node-10', user: { type: 'Bot' }, created_at: '2024-01-01T00:00:00Z', body: '#### :robot: Safe-Settings config changes detected:\nten' },
+        { id: 5, node_id: 'node-5', user: { type: 'Bot' }, created_at: '2024-01-01T00:00:00Z', body: '#### :robot: Safe-Settings config changes detected:\nfive' }
+      ])
+      const settings = createSettingsWithDedupeEnabled({})
+      settings.results = [changeResult('test-repo')]
+
+      await settings.handleResults()
+
+      expect(stubContext.octokit.graphql.mock.calls[0][1]).toEqual({ id: 'node-10' })
+    })
   })
 }) // Settings Tests
