@@ -715,4 +715,35 @@ repository:
       expect(mockRepoSync).toHaveBeenCalledTimes(1)
     })
   }) // updateRepos - archived repo skipping
+
+  describe('handleResults - diff table HTML', () => {
+    beforeEach(() => {
+      stubContext.payload.check_run = {
+        id: 1,
+        check_suite: { pull_requests: [{ number: 42 }] }
+      }
+      stubContext.payload.repository = { owner: { login: 'test' }, name: 'test-repo' }
+      stubContext.octokit.rest.issues = {
+        createComment: jest.fn().mockResolvedValue({})
+      }
+      stubContext.octokit.rest.checks = {
+        update: jest.fn().mockResolvedValue({})
+      }
+    })
+
+    it('closes every diff row and the table itself so the HTML is well-formed', async () => {
+      const settings = createSettings({})
+      settings.nop = true
+      settings.results = [
+        { type: 'INFO', plugin: 'Repository', repo: 'test-repo', action: { additions: {}, deletions: {}, modifications: { name: 'test-repo' } } },
+        { type: 'ERROR', plugin: 'Repository', repo: 'test-repo-2', action: { msg: 'boom', additions: null, deletions: null, modifications: null } }
+      ]
+
+      await settings.handleResults()
+
+      const body = stubContext.octokit.rest.issues.createComment.mock.calls[0][0].body
+      expect(body).not.toContain('</td><tr>')
+      expect(body).toContain('</tbody></table>')
+    })
+  })
 }) // Settings Tests
