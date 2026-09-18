@@ -545,6 +545,10 @@ You can pass environment variables; the easiest way to do it is via a `.env` fil
   ```
   ENABLE_PR_COMMENT=true
   ```
+1. Minimize the previous safe-settings PR comment as outdated before posting a new one, so only a single comment is visible per PR, using `PR_COMMENT_DEDUPE_ENABLED` (default is `false`). For e.g.
+  ```
+  PR_COMMENT_DEDUPE_ENABLED=true
+  ```
 1. Block repository renaming manually using `BLOCK_REPO_RENAME_BY_HUMAN` (default is `false`). For e.g.
   ```
   BLOCK_REPO_RENAME_BY_HUMAN=true
