@@ -32,6 +32,11 @@ describe('env', () => {
       const FULL_SYNC_NOP = envTest.FULL_SYNC_NOP
       expect(FULL_SYNC_NOP).toEqual(false)
     })
+
+    it('loads default PR_COMMENT_DEDUPE_ENABLED if not passed', () => {
+      const PR_COMMENT_DEDUPE_ENABLED = envTest.PR_COMMENT_DEDUPE_ENABLED
+      expect(PR_COMMENT_DEDUPE_ENABLED).toEqual('false')
+    })
   })
 
   describe('load override values', () => {
@@ -43,6 +48,18 @@ describe('env', () => {
       process.env.DEPLOYMENT_CONFIG_FILE = 'safe-settings-deployment.yml'
       process.env.CREATE_PR_COMMENT = 'false'
       process.env.FULL_SYNC_NOP = false
+      process.env.PR_COMMENT_DEDUPE_ENABLED = 'true'
+    })
+
+    afterAll(() => {
+      delete process.env.ADMIN_REPO
+      delete process.env.CONFIG_PATH
+      delete process.env.SETTINGS_FILE_PATH
+      delete process.env.DEPLOYMENT_CONFIG_FILE
+      delete process.env.CREATE_PR_COMMENT
+      delete process.env.FULL_SYNC_NOP
+      delete process.env.PR_COMMENT_DEDUPE_ENABLED
+      jest.resetModules()
     })
 
     it('loads override values if passed', () => {
@@ -59,6 +76,8 @@ describe('env', () => {
       expect(CREATE_PR_COMMENT).toEqual('false')
       const FULL_SYNC_NOP = envTest.FULL_SYNC_NOP
       expect(FULL_SYNC_NOP).toEqual(false)
+      const PR_COMMENT_DEDUPE_ENABLED = envTest.PR_COMMENT_DEDUPE_ENABLED
+      expect(PR_COMMENT_DEDUPE_ENABLED).toEqual('true')
     })
   })
 })

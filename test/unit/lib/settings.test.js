@@ -715,4 +715,303 @@ repository:
       expect(mockRepoSync).toHaveBeenCalledTimes(1)
     })
   }) // updateRepos - archived repo skipping
+
+  describe('handleResults - PR comment dedupe', () => {
+    function changeResult (repo) {
+      return {
+        type: 'INFO',
+        plugin: 'Repository',
+        repo,
+        action: { additions: {}, deletions: {}, modifications: { name: repo } }
+      }
+    }
+
+    function createSettingsWithDedupeEnabled (config) {
+      const previousValue = process.env.PR_COMMENT_DEDUPE_ENABLED
+      jest.resetModules()
+      process.env.PR_COMMENT_DEDUPE_ENABLED = 'true'
+      const SettingsWithDedupeEnabled = require('../../../lib/settings')
+      if (previousValue === undefined) {
+        delete process.env.PR_COMMENT_DEDUPE_ENABLED
+      } else {
+        process.env.PR_COMMENT_DEDUPE_ENABLED = previousValue
+      }
+      jest.resetModules()
+
+      return new SettingsWithDedupeEnabled(true, stubContext, mockRepo, config, mockRef, mockSubOrg)
+    }
+
+    beforeEach(() => {
+      stubContext.payload.check_run = {
+        id: 1,
+        check_suite: { pull_requests: [{ number: 42 }] }
+      }
+      stubContext.payload.repository = { owner: { login: 'test' }, name: 'test-repo' }
+      stubContext.octokit.rest.issues = {
+        listComments: jest.fn(),
+        createComment: jest.fn().mockResolvedValue({ data: { id: 999, user: { id: 12345 } } })
+      }
+      stubContext.octokit.rest.checks = {
+        update: jest.fn().mockResolvedValue({})
+      }
+      stubContext.octokit.graphql = jest.fn().mockResolvedValue({})
+      stubContext.octokit.paginate = jest.fn().mockResolvedValue([])
+    })
+
+    it('does not list or minimize previous comments by default', async () => {
+      const settings = createSettings({})
+      settings.nop = true
+      settings.results = [changeResult('test-repo')]
+
+      await settings.handleResults()
+
+      expect(stubContext.octokit.paginate).not.toHaveBeenCalled()
+      expect(stubContext.octokit.graphql).not.toHaveBeenCalled()
+      expect(stubContext.octokit.rest.issues.createComment).toHaveBeenCalledTimes(1)
+    })
+
+    it('minimizes a stale matching bot comment and creates a fresh one when PR_COMMENT_DEDUPE_ENABLED=true', async () => {
+      stubContext.octokit.paginate.mockResolvedValue([
+        { id: 100, node_id: 'node-100', user: { type: 'User', id: 1 }, body: 'unrelated comment' },
+        { id: 200, node_id: 'node-200', user: { type: 'Bot', id: 12345 }, body: '#### :robot: Safe-Settings config changes detected:\nold diff' }
+      ])
+      const settings = createSettingsWithDedupeEnabled({})
+      settings.results = [changeResult('test-repo')]
+
+      await settings.handleResults()
+
+      expect(stubContext.octokit.graphql).toHaveBeenCalledTimes(2)
+      expect(stubContext.octokit.graphql.mock.calls[0][1]).toEqual({ ids: ['node-200'] })
+      expect(stubContext.octokit.graphql.mock.calls[1][1]).toEqual({ id: 'node-200' })
+      expect(stubContext.octokit.rest.issues.createComment).toHaveBeenCalledTimes(1)
+    })
+
+    it('minimizes every stale matching comment when several exist from repeat runs', async () => {
+      stubContext.octokit.paginate.mockResolvedValue([
+        { id: 1, node_id: 'node-1', user: { id: 12345 }, body: '#### :robot: Safe-Settings config changes detected:\nfirst' },
+        { id: 2, node_id: 'node-2', user: { id: 12345 }, body: '#### :robot: Safe-Settings config changes detected:\nsecond' }
+      ])
+      const settings = createSettingsWithDedupeEnabled({})
+      settings.results = [changeResult('test-repo')]
+
+      await settings.handleResults()
+
+      expect(stubContext.octokit.graphql).toHaveBeenCalledTimes(3)
+      expect(stubContext.octokit.graphql.mock.calls.slice(1).map(call => call[1])).toEqual([
+        { id: 'node-1' },
+        { id: 'node-2' }
+      ])
+    })
+
+    it('does not re-minimize a comment that is already minimized', async () => {
+      stubContext.octokit.paginate.mockResolvedValue([
+        { id: 1, node_id: 'node-1', user: { id: 12345 }, body: '#### :robot: Safe-Settings config changes detected:\nold diff' }
+      ])
+      stubContext.octokit.graphql.mockResolvedValue({ nodes: [{ id: 'node-1', isMinimized: true }] })
+      const settings = createSettingsWithDedupeEnabled({})
+      settings.results = [changeResult('test-repo')]
+
+      await settings.handleResults()
+
+      expect(stubContext.octokit.graphql).toHaveBeenCalledTimes(1)
+      expect(stubContext.octokit.graphql.mock.calls[0][1]).toEqual({ ids: ['node-1'] })
+    })
+
+    it('only minimizes the not-yet-minimized comment out of several stale matches', async () => {
+      stubContext.octokit.paginate.mockResolvedValue([
+        { id: 1, node_id: 'node-1', user: { id: 12345 }, body: '#### :robot: Safe-Settings config changes detected:\nfirst' },
+        { id: 2, node_id: 'node-2', user: { id: 12345 }, body: '#### :robot: Safe-Settings config changes detected:\nsecond' }
+      ])
+      stubContext.octokit.graphql.mockResolvedValueOnce({
+        nodes: [
+          { id: 'node-1', isMinimized: true },
+          { id: 'node-2', isMinimized: false }
+        ]
+      })
+      const settings = createSettingsWithDedupeEnabled({})
+      settings.results = [changeResult('test-repo')]
+
+      await settings.handleResults()
+
+      expect(stubContext.octokit.graphql).toHaveBeenCalledTimes(2)
+      expect(stubContext.octokit.graphql.mock.calls[0][1]).toEqual({ ids: ['node-1', 'node-2'] })
+      expect(stubContext.octokit.graphql.mock.calls[1][1]).toEqual({ id: 'node-2' })
+    })
+
+    it('batches the isMinimized lookup into groups of 100 node IDs', async () => {
+      const manyComments = Array.from({ length: 150 }, (_, index) => ({
+        id: index + 1,
+        node_id: `node-${index + 1}`,
+        user: { id: 12345 },
+        body: '#### :robot: Safe-Settings config changes detected:\nrepeat'
+      }))
+      stubContext.octokit.paginate.mockResolvedValue(manyComments)
+      const settings = createSettingsWithDedupeEnabled({})
+      settings.results = [changeResult('test-repo')]
+
+      await settings.handleResults()
+
+      const nodeQueryCalls = stubContext.octokit.graphql.mock.calls.filter(call => call[1].ids)
+      expect(nodeQueryCalls).toHaveLength(2)
+      expect(nodeQueryCalls[0][1].ids).toHaveLength(100)
+      expect(nodeQueryCalls[1][1].ids).toHaveLength(50)
+    })
+
+    it('creates a comment without minimizing when no existing comment matches the heading', async () => {
+      stubContext.octokit.paginate.mockResolvedValue([
+        { id: 1, node_id: 'node-1', body: 'just a regular review comment' }
+      ])
+      const settings = createSettingsWithDedupeEnabled({})
+      settings.results = [changeResult('test-repo')]
+
+      await settings.handleResults()
+
+      expect(stubContext.octokit.graphql).not.toHaveBeenCalled()
+      expect(stubContext.octokit.rest.issues.createComment).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not re-minimize the comment it just created', async () => {
+      stubContext.octokit.paginate.mockResolvedValue([
+        { id: 999, node_id: 'node-999', user: { id: 12345 }, body: '#### :robot: Safe-Settings config changes detected:\nbrand new' }
+      ])
+      const settings = createSettingsWithDedupeEnabled({})
+      settings.results = [changeResult('test-repo')]
+
+      await settings.handleResults()
+
+      expect(stubContext.octokit.graphql).not.toHaveBeenCalled()
+    })
+
+    it('does not minimize a comment created after its own, to avoid overlapping runs hiding each other', async () => {
+      stubContext.octokit.paginate.mockResolvedValue([
+        { id: 1000, node_id: 'node-1000', user: { type: 'Bot', id: 12345 }, body: '#### :robot: Safe-Settings config changes detected:\nnewer concurrent run' }
+      ])
+      const settings = createSettingsWithDedupeEnabled({})
+      settings.results = [changeResult('test-repo')]
+
+      await settings.handleResults()
+
+      expect(stubContext.octokit.graphql).not.toHaveBeenCalled()
+    })
+
+    it('still creates the new comment when minimizing a previous one fails', async () => {
+      stubContext.octokit.paginate.mockResolvedValue([
+        { id: 1, node_id: 'node-1', user: { id: 12345 }, body: '#### :robot: Safe-Settings config changes detected:\nold diff' }
+      ])
+      stubContext.octokit.graphql
+        .mockResolvedValueOnce({ nodes: [{ id: 'node-1', isMinimized: false }] })
+        .mockRejectedValueOnce(new Error('boom'))
+      const settings = createSettingsWithDedupeEnabled({})
+      settings.results = [changeResult('test-repo')]
+
+      await settings.handleResults()
+
+      expect(stubContext.octokit.rest.issues.createComment).toHaveBeenCalledTimes(1)
+    })
+
+    it('still creates the new comment when listing previous comments fails', async () => {
+      stubContext.octokit.paginate.mockRejectedValue(new Error('rate limited'))
+      const settings = createSettingsWithDedupeEnabled({})
+      settings.results = [changeResult('test-repo')]
+
+      await settings.handleResults()
+
+      expect(stubContext.octokit.graphql).not.toHaveBeenCalled()
+      expect(stubContext.octokit.rest.issues.createComment).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not minimize a human comment that merely quotes the heading', async () => {
+      stubContext.octokit.paginate.mockResolvedValue([
+        { id: 1, node_id: 'node-1', user: { type: 'User' }, body: 'Quoting the bot: "#### :robot: Safe-Settings config changes detected:" is odd phrasing' }
+      ])
+      const settings = createSettingsWithDedupeEnabled({})
+      settings.results = [changeResult('test-repo')]
+
+      await settings.handleResults()
+
+      expect(stubContext.octokit.graphql).not.toHaveBeenCalled()
+      expect(stubContext.octokit.rest.issues.createComment).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not minimize a different bot comment that merely quotes the heading', async () => {
+      stubContext.octokit.paginate.mockResolvedValue([
+        { id: 1, node_id: 'node-1', user: { id: 99999 }, body: 'Some other bot noticed: "#### :robot: Safe-Settings config changes detected:" in passing' }
+      ])
+      const settings = createSettingsWithDedupeEnabled({})
+      settings.results = [changeResult('test-repo')]
+
+      await settings.handleResults()
+
+      expect(stubContext.octokit.graphql).not.toHaveBeenCalled()
+      expect(stubContext.octokit.rest.issues.createComment).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not minimize a different bot comment that starts with the exact same heading', async () => {
+      stubContext.octokit.paginate.mockResolvedValue([
+        { id: 1, node_id: 'node-1', user: { type: 'Bot', id: 99999 }, body: '#### :robot: Safe-Settings config changes detected:\nfrom some other app' }
+      ])
+      const settings = createSettingsWithDedupeEnabled({})
+      settings.results = [changeResult('test-repo')]
+
+      await settings.handleResults()
+
+      expect(stubContext.octokit.graphql).not.toHaveBeenCalled()
+      expect(stubContext.octokit.rest.issues.createComment).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not attempt any reconciliation when the new comment has no user identity', async () => {
+      stubContext.octokit.rest.issues.createComment.mockResolvedValue({ data: { id: 999 } })
+      stubContext.octokit.paginate.mockResolvedValue([
+        { id: 1, node_id: 'node-1', user: { type: 'Bot', id: 12345 }, body: '#### :robot: Safe-Settings config changes detected:\nold diff' }
+      ])
+      const settings = createSettingsWithDedupeEnabled({})
+      settings.results = [changeResult('test-repo')]
+
+      await settings.handleResults()
+
+      expect(stubContext.octokit.graphql).not.toHaveBeenCalled()
+      expect(stubContext.octokit.rest.issues.createComment).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not attempt to minimize a matching comment with no node_id', async () => {
+      stubContext.octokit.paginate.mockResolvedValue([
+        { id: 1, user: { id: 12345 }, body: '#### :robot: Safe-Settings config changes detected:\nold diff' }
+      ])
+      const settings = createSettingsWithDedupeEnabled({})
+      settings.results = [changeResult('test-repo')]
+
+      await settings.handleResults()
+
+      expect(stubContext.octokit.graphql).not.toHaveBeenCalled()
+      expect(stubContext.octokit.rest.issues.createComment).toHaveBeenCalledTimes(1)
+    })
+
+    it('creates the new comment before minimizing the previous one, so a create failure never leaves the PR with no visible comment', async () => {
+      stubContext.octokit.paginate.mockResolvedValue([
+        { id: 1, node_id: 'node-1', user: { id: 12345 }, body: '#### :robot: Safe-Settings config changes detected:\nold diff' }
+      ])
+      const settings = createSettingsWithDedupeEnabled({})
+      settings.results = [changeResult('test-repo')]
+
+      await settings.handleResults()
+
+      const createOrder = stubContext.octokit.rest.issues.createComment.mock.invocationCallOrder[0]
+      const minimizeOrder = stubContext.octokit.graphql.mock.invocationCallOrder[0]
+      expect(createOrder).toBeLessThan(minimizeOrder)
+    })
+
+    it('does not attempt to minimize anything when creating the new comment fails', async () => {
+      stubContext.octokit.paginate.mockResolvedValue([
+        { id: 1, node_id: 'node-1', user: { type: 'Bot' }, body: '#### :robot: Safe-Settings config changes detected:\nold diff' }
+      ])
+      stubContext.octokit.rest.issues.createComment.mockRejectedValue(new Error('boom'))
+      const settings = createSettingsWithDedupeEnabled({})
+      settings.results = [changeResult('test-repo')]
+
+      await expect(settings.handleResults()).rejects.toThrow('boom')
+
+      expect(stubContext.octokit.paginate).not.toHaveBeenCalled()
+      expect(stubContext.octokit.graphql).not.toHaveBeenCalled()
+    })
+  })
 }) // Settings Tests
