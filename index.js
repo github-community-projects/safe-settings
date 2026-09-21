@@ -581,8 +581,11 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
 
     params = Object.assign(context.repo(), { pull_number: pull_request.number })
 
-    const changes = await context.octokit.rest.pulls.listFiles(params)
-    const files = changes.data.map(f => { return f.filename })
+    const changes = await context.octokit.paginate(
+      context.octokit.rest.pulls.listFiles,
+      Object.assign({}, params, { per_page: 100 })
+    )
+    const files = changes.map(f => { return f.filename })
 
     const settingsModified = files.includes(Settings.FILE_PATH)
 
