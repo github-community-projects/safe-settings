@@ -303,6 +303,172 @@ repository:
         // }
       })
     })
+
+    describe('repo-scoped suborg config resolution', () => {
+      // When syncing a single repo (not a suborg config change), getSubOrgConfigs(repo)
+      // should resolve membership by inspecting only that repo's teams/properties,
+      // instead of enumerating every repo of every suborg across the org.
+      beforeEach(() => {
+        // No suborg => subOrgConfigMap is not set => repo-scoped path is eligible
+        mockSubOrg = undefined
+        stubConfig = { restrictedRepos: {} }
+        subOrgConfig = yaml.load(`
+          suborgrepos:
+          - new-repo
+
+          suborgteams:
+          - core
+
+          suborgproperties:
+          - EDP: true
+          - do_no_delete: true
+
+          repository:
+            topics:
+            - frontend
+          `)
+      })
+
+      function createRepoScopedSettings () {
+        settings = createSettings(stubConfig)
+        jest.spyOn(settings, 'loadConfigMap').mockImplementation(() => [{ name: 'frontend', path: '.github/suborgs/frontend.yml' }])
+        jest.spyOn(settings, 'loadYaml').mockImplementation(() => subOrgConfig)
+        // org-wide resolvers should NOT be used on the repo-scoped path
+        jest.spyOn(settings, 'getReposForTeam').mockResolvedValue([{ name: 'repo-test' }])
+        jest.spyOn(settings, 'getSubOrgRepositories').mockResolvedValue([{ repository_name: 'repo-for-property' }])
+        return settings
+      }
+
+      it('matches by suborgrepos glob without any repo API calls', async () => {
+        settings = createRepoScopedSettings()
+        const getReposTeams = jest.spyOn(settings, 'getReposTeams').mockResolvedValue([])
+        const getRepoProps = jest.spyOn(settings, 'getRepoCustomPropertyValues').mockResolvedValue([])
+
+        const subOrgConfigs = await settings.getSubOrgConfigs({ owner: 'test', repo: 'new-repo' })
+
+        expect(subOrgConfigs['new-repo']).toBeDefined()
+        expect(subOrgConfigs['new-repo'].source).toEqual('.github/suborgs/frontend.yml')
+        // glob matched first, so teams/properties are never queried
+        expect(getReposTeams).not.toHaveBeenCalled()
+        expect(getRepoProps).not.toHaveBeenCalled()
+        // org-wide resolvers are never used
+        expect(settings.getReposForTeam).not.toHaveBeenCalled()
+        expect(settings.getSubOrgRepositories).not.toHaveBeenCalled()
+      })
+
+      it('matches by team membership using the repo-scoped teams endpoint', async () => {
+        settings = createRepoScopedSettings()
+        const getReposTeams = jest.spyOn(settings, 'getReposTeams').mockResolvedValue([{ slug: 'core' }])
+        const getRepoProps = jest.spyOn(settings, 'getRepoCustomPropertyValues').mockResolvedValue([])
+
+        const subOrgConfigs = await settings.getSubOrgConfigs({ owner: 'test', repo: 'some-repo' })
+
+        expect(subOrgConfigs['some-repo']).toBeDefined()
+        expect(getReposTeams).toHaveBeenCalledTimes(1)
+        // team matched, so properties are never queried
+        expect(getRepoProps).not.toHaveBeenCalled()
+        expect(settings.getReposForTeam).not.toHaveBeenCalled()
+      })
+
+      it('matches by custom property using the repo-scoped properties endpoint', async () => {
+        settings = createRepoScopedSettings()
+        const getReposTeams = jest.spyOn(settings, 'getReposTeams').mockResolvedValue([])
+        const getRepoProps = jest.spyOn(settings, 'getRepoCustomPropertyValues').mockResolvedValue([{ property_name: 'EDP', value: 'true' }])
+
+        const subOrgConfigs = await settings.getSubOrgConfigs({ owner: 'test', repo: 'some-repo' })
+
+        expect(subOrgConfigs['some-repo']).toBeDefined()
+        expect(getReposTeams).toHaveBeenCalledTimes(1)
+        expect(getRepoProps).toHaveBeenCalledTimes(1)
+        expect(settings.getSubOrgRepositories).not.toHaveBeenCalled()
+      })
+
+      it('returns no config when the repo matches nothing', async () => {
+        settings = createRepoScopedSettings()
+        jest.spyOn(settings, 'getReposTeams').mockResolvedValue([{ slug: 'other-team' }])
+        jest.spyOn(settings, 'getRepoCustomPropertyValues').mockResolvedValue([{ property_name: 'EDP', value: 'false' }])
+
+        const subOrgConfigs = await settings.getSubOrgConfigs({ owner: 'test', repo: 'some-repo' })
+
+        expect(Object.keys(subOrgConfigs)).toHaveLength(0)
+      })
+
+      it('falls back to the org-wide path when processing a suborg config change', async () => {
+        settings = createRepoScopedSettings()
+        settings.subOrgConfigMap = [{ path: '.github/suborgs/frontend.yml' }]
+        const getReposTeams = jest.spyOn(settings, 'getReposTeams').mockResolvedValue([])
+        const getRepoProps = jest.spyOn(settings, 'getRepoCustomPropertyValues').mockResolvedValue([])
+
+        await settings.getSubOrgConfigs({ owner: 'test', repo: 'new-repo' })
+
+        // org-wide resolvers are used; repo-scoped ones are not
+        expect(settings.getReposForTeam).toHaveBeenCalled()
+        expect(settings.getSubOrgRepositories).toHaveBeenCalled()
+        expect(getReposTeams).not.toHaveBeenCalled()
+        expect(getRepoProps).not.toHaveBeenCalled()
+      })
+    })
+
+    describe('repoMatchesProperties', () => {
+      beforeEach(() => {
+        mockSubOrg = undefined
+        settings = createSettings({ restrictedRepos: {} })
+      })
+
+      it('coerces YAML booleans/numbers to match the API string values', () => {
+        expect(settings.repoMatchesProperties([{ property_name: 'EDP', value: 'true' }], [{ EDP: true }])).toBe(true)
+        expect(settings.repoMatchesProperties([{ property_name: 'tier', value: '2' }], [{ tier: 2 }])).toBe(true)
+      })
+
+      it('matches property names case-insensitively', () => {
+        // GitHub may return the property name in a different case than the config declares
+        expect(settings.repoMatchesProperties([{ property_name: 'edp', value: 'true' }], [{ EDP: true }])).toBe(true)
+        expect(settings.repoMatchesProperties([{ property_name: 'EDP', value: 'true' }], [{ edp: true }])).toBe(true)
+      })
+
+      it('returns false when the property is absent or the value differs', () => {
+        expect(settings.repoMatchesProperties([{ property_name: 'EDP', value: 'false' }], [{ EDP: true }])).toBe(false)
+        expect(settings.repoMatchesProperties([], [{ EDP: true }])).toBe(false)
+      })
+
+      it('matches multi-select property values that contain the expected value', () => {
+        expect(settings.repoMatchesProperties([{ property_name: 'envs', value: ['dev', 'prod'] }], [{ envs: 'prod' }])).toBe(true)
+        expect(settings.repoMatchesProperties([{ property_name: 'envs', value: ['dev'] }], [{ envs: 'prod' }])).toBe(false)
+      })
+    })
+
+    describe('getRepoCustomPropertyValues', () => {
+      beforeEach(() => {
+        mockSubOrg = undefined
+      })
+
+      it('paginates the repo-scoped custom properties endpoint', async () => {
+        const endpoint = jest.fn()
+        stubContext.octokit.rest.repos.customPropertiesForReposGetRepositoryValues = endpoint
+        settings = createSettings({ restrictedRepos: {} })
+        stubContext.octokit.paginate.mockResolvedValue([{ property_name: 'Team', value: 'DevOps' }])
+
+        const values = await settings.getRepoCustomPropertyValues({ owner: 'test', repo: 'test-repo' })
+
+        expect(stubContext.octokit.paginate).toHaveBeenCalledWith(endpoint, {
+          owner: 'test',
+          repo: 'test-repo',
+          per_page: 100
+        })
+        expect(values).toEqual([{ property_name: 'Team', value: 'DevOps' }])
+      })
+
+      it('throws instead of paginating an undefined route when the octokit method is missing', async () => {
+        // A renamed/removed octokit method must not silently degrade: paginate(undefined, ...)
+        // requests the API root and returns junk, making every suborgproperties match fail.
+        delete stubContext.octokit.rest.repos.customPropertiesForReposGetRepositoryValues
+        settings = createSettings({ restrictedRepos: {} })
+
+        await expect(settings.getRepoCustomPropertyValues({ owner: 'test', repo: 'test-repo' }))
+          .rejects.toThrow('customPropertiesForReposGetRepositoryValues is not available')
+        expect(stubContext.octokit.paginate).not.toHaveBeenCalled()
+      })
+    })
   }) // loadConfigs
 
   describe('loadYaml', () => {
