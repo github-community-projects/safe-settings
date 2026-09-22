@@ -300,6 +300,25 @@ overridevalidators:
 
 A sample of `deployment-settings` file is found [here](docs/sample-settings/sample-deployment-settings.yml).
 
+### Configuration schemas
+
+The JSON schemas in `schema/dereferenced/` support editor validation of org,
+suborg, and repository configuration. They use GitHub's OpenAPI 3.1 description
+for API version `2026-03-10`, including native JSON Schema nullable types.
+Branch `protection` also accepts `null`, `{}`, `[]`, or `false` to delete protection.
+Regenerate all three schemas after changing their sources in `schema/` with
+`npm run build:schema`; do not edit the generated files directly.
+
+Org-level `rulesets` use the organization API shape; repo-level rulesets use the
+repository API shape. Suborg `ruleset_scope` overrides the org default in
+`settings.yml`, falling back to `repo` when neither sets a scope. An `org` scope
+requires nonempty `suborgproperties`; otherwise it also falls back to `repo`.
+For org-scoped suborgs, safe-settings replaces repository targeting conditions
+with `repository_property` targeting derived from `suborgproperties`, so a
+ruleset may specify only its ref conditions. When a suborg omits its scope and
+has property filters, its standalone schema accepts both API shapes because it
+cannot determine the inherited org default.
+
 ### Custom Status Checks
 For branch protection rules and rulesets, you can allow for status checks to be defined outside of safe-settings together with your usual safe settings.
 

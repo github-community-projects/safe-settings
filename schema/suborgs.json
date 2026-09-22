@@ -6,13 +6,13 @@
   "properties": {
     "ruleset_scope": {
       "type": "string",
-      "description": "Scope for rulesets in this suborg. 'repo' (default) creates individual repository-scoped rulesets for each matched repo. 'org' creates a single organization-scoped ruleset using repository_property targeting.",
+      "description": "Scope for rulesets in this suborg. Inherits settings.yml's ruleset_scope when omitted, otherwise defaults to 'repo'. 'org' creates organization-scoped rulesets using suborgproperties targeting; without nonempty suborgproperties it falls back to 'repo'.",
       "enum": ["repo", "org"],
       "default": "repo"
     },
     "rulesets": {
       "type": "array",
-      "description": "Rulesets to apply to repositories in this suborg",
+      "description": "Rulesets to apply to repositories in this suborg. When org scope is possible, accepts repository-style ref conditions or organization conditions; safe-settings supplies repository_property targeting from suborgproperties.",
       "items": {
         "$ref": "#/$defs/RulesetSettings"
       }
@@ -117,12 +117,39 @@
       }
     }
   },
+  "if": {
+    "anyOf": [
+      {
+        "required": ["ruleset_scope"],
+        "properties": {
+          "ruleset_scope": { "const": "repo" }
+        }
+      },
+      {
+        "not": {
+          "required": ["suborgproperties"],
+          "properties": {
+            "suborgproperties": { "type": "array", "minItems": 1 }
+          }
+        }
+      }
+    ]
+  },
+  "then": {
+    "properties": {
+      "rulesets": {
+        "items": {
+          "$ref": "#/$defs/RepositoryRulesetSettings"
+        }
+      }
+    }
+  },
   "$defs": {
     "RepositorySettings": {
       "description": "Repository settings. Use force_create to create the repository if it does not exist, and template to specify a template repository to use when creating it.",
       "allOf": [
         {
-          "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}/patch/requestBody/content/application~1json/schema"
+          "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}/patch/requestBody/content/application~1json/schema"
         },
         {
           "type": "object",
@@ -209,7 +236,7 @@
       "description": "A collaborator entry giving a specific user access to a repository.",
       "allOf": [
         {
-          "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}~1collaborators~1{username}/put/requestBody/content/application~1json/schema"
+          "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}~1collaborators~1{username}/put/requestBody/content/application~1json/schema"
         },
         {
           "type": "object",
@@ -239,7 +266,7 @@
       "description": "A team entry",
       "allOf": [
         {
-          "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.2026-03-10.json#/paths/~1orgs~1{org}~1teams~1{team_slug}~1repos~1{owner}~1{repo}/put/requestBody/content/application~1json/schema"
+          "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.2026-03-10.json#/paths/~1orgs~1{org}~1teams~1{team_slug}~1repos~1{owner}~1{repo}/put/requestBody/content/application~1json/schema"
         },
         {
           "type": "object",
@@ -306,13 +333,21 @@
           "type": "string"
         },
         "protection": {
-          "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}~1branches~1{branch}~1protection/put/requestBody/content/application~1json/schema"
+          "anyOf": [
+            {
+              "enum": [null, {}, [], false],
+              "description": "An empty value deletes the existing branch protection"
+            },
+            {
+              "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}~1branches~1{branch}~1protection/put/requestBody/content/application~1json/schema"
+            }
+          ]
         }
       }
     },
     "AutolinkSettings": {
       "description": "An autolink reference entry",
-      "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}~1autolinks/post/requestBody/content/application~1json/schema"
+      "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}~1autolinks/post/requestBody/content/application~1json/schema"
     },
     "ValidatorSettings": {
       "description": "Repository name validation",
@@ -324,8 +359,16 @@
       }
     },
     "RulesetSettings": {
-      "description": "A ruleset entry",
-      "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.2026-03-10.json#/paths/~1orgs~1{org}~1rulesets/post/requestBody/content/application~1json/schema"
+      "description": "A suborg ruleset entry. Scope may be inherited from settings.yml, which cannot be determined from this file alone.",
+      "anyOf": [
+        { "$ref": "#/$defs/RepositoryRulesetSettings" },
+        {
+          "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.2026-03-10.json#/paths/~1orgs~1{org}~1rulesets/post/requestBody/content/application~1json/schema"
+        }
+      ]
+    },
+    "RepositoryRulesetSettings": {
+      "$ref": "repos.json#/$defs/RulesetSettings"
     },
     "EnvironmentsSettings": {
       "description": "A deployment environment configuration entry",
