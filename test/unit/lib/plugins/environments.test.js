@@ -1393,6 +1393,36 @@ describe('Environments Plugin test suite', () => {
       })
     })
   })
+
+  describe('When the same config is used to build the plugin for more than one repo', () => {
+    const config = () => [
+      {
+        name: 'shared_environment',
+        deployment_branch_policy: {
+          protected_branches: false,
+          custom_branch_policies: ['main']
+        }
+      }
+    ]
+
+    it('leaves the config it was given untouched', () => {
+      const entries = config()
+
+      new Environments(undefined, github, { owner: org, repo }, entries, log, errors)
+
+      expect(entries[0].deployment_branch_policy.custom_branch_policies).toEqual(['main'])
+    })
+
+    it('expands the custom branch policies the same way for every repo', () => {
+      const entries = config()
+
+      const first = new Environments(undefined, github, { owner: org, repo }, entries, log, errors)
+      const second = new Environments(undefined, github, { owner: org, repo: 'other' }, entries, log, errors)
+
+      expect(second.entries[0].deployment_branch_policy.custom_branch_policies).toEqual(first.entries[0].deployment_branch_policy.custom_branch_policies)
+      expect(second.entries[0].deployment_branch_policy.custom_branch_policies).toEqual([{ name: 'main', type: 'branch' }])
+    })
+  })
 })
 
 describe('nopifyRequest', () => {
