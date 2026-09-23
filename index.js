@@ -231,20 +231,27 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
       github.rest.apps.listInstallations.endpoint.merge({ per_page: 100 })
     )
 
-    if (installations.length > 0) {
-      const installation = installations[0]
-      const github = await robot.auth(installation.id)
-      const context = {
-        payload: {
-          installation
-        },
-        octokit: github,
-        log: robot.log,
-        repo: () => { return { repo: env.ADMIN_REPO, owner: installation.account.login } }
+    const results = []
+    for (const installation of installations) {
+      robot.log.info(`Syncing installation ${installation.id} for ${installation.account.login}`)
+      try {
+        const github = await robot.auth(installation.id)
+        const context = {
+          payload: {
+            installation
+          },
+          octokit: github,
+          log: robot.log,
+          repo: () => { return { repo: env.ADMIN_REPO, owner: installation.account.login } }
+        }
+        const result = await syncAllSettings(nop, context)
+        results.push({ installationId: installation.id, owner: installation.account.login, result })
+      } catch (error) {
+        robot.log.error(`Failed to sync installation ${installation.id} for ${installation.account.login}: ${error.message}`)
+        results.push({ installationId: installation.id, owner: installation.account.login, error: error.message })
       }
-      return syncAllSettings(nop, context)
     }
-    return null
+    return results
   }
 
   robot.on('push', async context => {
