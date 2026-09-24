@@ -48,6 +48,13 @@
     "validator": {
       "$ref": "#/$defs/ValidatorSettings"
     },
+    "rulesets": {
+      "description": "Repository rulesets applied to this repository",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/RulesetSettings"
+      }
+    },
     "environments": {
       "description": "Deployment environments",
       "type": "array",
@@ -75,7 +82,7 @@
       "description": "Repository settings",
       "allOf": [
         {
-          "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}/patch/requestBody/content/application~1json/schema"
+          "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}/patch/requestBody/content/application~1json/schema"
         },
         {
           "type": "object",
@@ -162,7 +169,7 @@
       "description": "A collaborator entry giving a specific user access to a repository.",
       "allOf": [
         {
-          "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}~1collaborators~1{username}/put/requestBody/content/application~1json/schema"
+          "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}~1collaborators~1{username}/put/requestBody/content/application~1json/schema"
         },
         {
           "type": "object",
@@ -192,7 +199,7 @@
       "description": "A team entry",
       "allOf": [
         {
-          "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.2026-03-10.json#/paths/~1orgs~1{org}~1teams~1{team_slug}~1repos~1{owner}~1{repo}/put/requestBody/content/application~1json/schema"
+          "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.2026-03-10.json#/paths/~1orgs~1{org}~1teams~1{team_slug}~1repos~1{owner}~1{repo}/put/requestBody/content/application~1json/schema"
         },
         {
           "type": "object",
@@ -259,13 +266,21 @@
           "type": "string"
         },
         "protection": {
-          "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}~1branches~1{branch}~1protection/put/requestBody/content/application~1json/schema"
+          "anyOf": [
+            {
+              "enum": [null, {}, [], false],
+              "description": "An empty value deletes the existing branch protection"
+            },
+            {
+              "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}~1branches~1{branch}~1protection/put/requestBody/content/application~1json/schema"
+            }
+          ]
         }
       }
     },
     "AutolinkSettings": {
       "description": "An autolink reference entry",
-      "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}~1autolinks/post/requestBody/content/application~1json/schema"
+      "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}~1autolinks/post/requestBody/content/application~1json/schema"
     },
     "ValidatorSettings": {
       "description": "Repository name validation",
@@ -277,8 +292,25 @@
       }
     },
     "RulesetSettings": {
-      "description": "A ruleset entry",
-      "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.2026-03-10.json#/paths/~1orgs~1{org}~1rulesets/post/requestBody/content/application~1json/schema"
+      "description": "A repository ruleset entry",
+      "allOf": [
+        {
+          "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}~1rulesets/post/requestBody/content/application~1json/schema"
+        },
+        {
+          "properties": {
+            "conditions": {
+              "not": {
+                "anyOf": [
+                  { "required": ["repository_name"] },
+                  { "required": ["repository_id"] },
+                  { "required": ["repository_property"] }
+                ]
+              }
+            }
+          }
+        }
+      ]
     },
     "EnvironmentsSettings": {
       "description": "A deployment environment configuration entry",

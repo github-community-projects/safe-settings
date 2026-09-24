@@ -47,8 +47,8 @@ const augmentRulesetAliases = (node) => {
 
 const schemas = [
   { src: 'schema/settings.json', dest: 'schema/dereferenced/settings.json' },
-  { src: 'schema/suborgs.json',  dest: 'schema/dereferenced/suborgs.json' },
-  { src: 'schema/repos.json',    dest: 'schema/dereferenced/repos.json' }
+  { src: 'schema/suborgs.json', dest: 'schema/dereferenced/suborgs.json' },
+  { src: 'schema/repos.json', dest: 'schema/dereferenced/repos.json' }
 ]
 
 ;(async () => {
@@ -75,7 +75,7 @@ const schemas = [
 
   const githubApiResolver = {
     order: 1,
-    canRead: /\/descriptions\/api\.github\.com\/api\.github\.com/,
+    canRead: file => file.url === specUrl,
     read: () => resolvedSpec
   }
 
