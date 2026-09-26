@@ -205,6 +205,13 @@ When a repo-level change (a push to `.github/repos/<repo>.yml`, or a `repository
 
 To handle this, after applying a repo-yml change `safe-settings` re-evaluates the repo's suborg membership. If the matched suborg source set changed, it runs the repo through the apply pipeline a second time so newly matched suborg settings are applied and settings from a no-longer-matching suborg can be removed in the same sync.
 
+For a repository that does not exist yet, team and custom-property membership
+lookups are deferred until after creation. A 404 from a membership endpoint is
+treated as an unmatched selector only when the repository itself also returns
+404; other lookup failures remain errors. Name-based `suborgrepos` matching still
+applies before creation. This allows `force_create` validation and apply runs to
+work when earlier changes have already configured team- or property-based suborgs.
+
 **Scope:** Re-evaluation runs only on the repo-yml change paths (`Settings.sync` and the per-repo loop of `Settings.syncSelectedRepos`). Global settings changes (`syncAll`) and suborg-yml changes (`syncSubOrgs`) already iterate all relevant repos and do not need it.
 
 **Loop prevention.** Two guards prevent infinite re-evaluation:
