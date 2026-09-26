@@ -335,6 +335,27 @@ describe('Branches', () => {
     })
 
     describe('when multiple branches are configured', () => {
+      it('applies mixed updates, additions and deletions once without writing unchanged branches', async () => {
+        when(github.rest.repos.getBranchProtection)
+          .calledWith(expect.objectContaining({ branch: 'new' }))
+          .mockRejectedValue({ status: 404 })
+        const plugin = configure([
+          { name: 'default', protection: { enforce_admins: true } },
+          { name: 'new', protection: { enforce_admins: true } },
+          { name: 'unchanged', protection: { enforce_admins: false } },
+          { name: 'removed', protection: null },
+          { name: 'unmanaged' }
+        ])
+
+        await plugin.sync()
+
+        expect(github.rest.repos.updateBranchProtection.mock.calls.map(([params]) => params.branch)).toEqual(['main', 'new'])
+        expect(github.rest.repos.deleteBranchProtection).toHaveBeenCalledTimes(1)
+        expect(github.rest.repos.deleteBranchProtection).toHaveBeenCalledWith({
+          owner: 'bkeepers', repo: 'test', branch: 'removed'
+        })
+      })
+
       it('updates them each appropriately', () => {
         const plugin = configure(
           [
@@ -387,6 +408,74 @@ describe('Branches', () => {
       github.rest.repos.deleteBranchProtection.endpoint = jest.fn().mockImplementation(params => {
         return { url: 'deleteBranchProtection', body: params }
       })
+    })
+
+    it.each([['main', 'develop'], ['develop', 'main']])(
+      'reports each branch change once when %s resolves before %s',
+      async (first, second) => {
+        const pending = {}
+        github.rest.repos.getBranchProtection.mockImplementation(({ branch }) =>
+          new Promise(resolve => { pending[branch] = resolve }))
+        const plugin = configureNop([
+          { name: 'default', protection: { enforce_admins: true } },
+          { name: 'develop', protection: { enforce_admins: true } }
+        ])
+
+        const sync = plugin.sync()
+        await Promise.resolve()
+        pending[first]({ data: { enforce_admins: { enabled: false } } })
+        await Promise.resolve()
+        pending[second]({ data: { enforce_admins: { enabled: false } } })
+        const results = await sync
+
+        expect(results).toHaveLength(4)
+        expect(new Set(results).size).toBe(4)
+        expect(results.filter(result => !result.endpoint).map(result => result.action.msg)).toEqual([
+          'The following changes will be applied to the branch protection for main branch',
+          'The following changes will be applied to the branch protection for develop branch'
+        ])
+        expect(results.filter(result => result.endpoint).map(result => ({
+          branch: result.body.branch, msg: result.action.msg
+        }))).toEqual([
+          { branch: 'main', msg: 'Update Branch Protection' },
+          { branch: 'develop', msg: 'Update Branch Protection' }
+        ])
+        expect(github.rest.repos.updateBranchProtection).not.toHaveBeenCalled()
+        expect(github.rest.repos.deleteBranchProtection).not.toHaveBeenCalled()
+      }
+    )
+
+    it('keeps mixed update, add, delete and error results local to their branches', async () => {
+      when(github.rest.repos.getBranchProtection)
+        .calledWith(expect.objectContaining({ branch: 'new' }))
+        .mockRejectedValue({ status: 404 })
+      when(github.rest.repos.getBranchProtection)
+        .calledWith(expect.objectContaining({ branch: 'forbidden' }))
+        .mockRejectedValue(Object.assign(new Error('Forbidden'), { status: 403 }))
+      const plugin = configureNop([
+        { name: 'default', protection: { enforce_admins: true } },
+        { name: 'new', protection: { enforce_admins: true } },
+        { name: 'unchanged', protection: { enforce_admins: false } },
+        { name: 'removed', protection: null },
+        { name: 'empty', protection: {} },
+        { name: 'forbidden', protection: { enforce_admins: true } },
+        { name: 'unmanaged' }
+      ])
+
+      const results = await plugin.sync()
+
+      expect(results).toHaveLength(6)
+      expect(results.filter(result => result.endpoint).map(result => ({
+        branch: result.body.branch, msg: result.action.msg, type: result.type
+      }))).toEqual([
+        { branch: 'main', msg: 'Update Branch Protection', type: 'INFO' },
+        { branch: 'new', msg: 'Add Branch Protection', type: 'INFO' },
+        { branch: 'removed', msg: 'Delete Branch Protection', type: 'INFO' },
+        { branch: 'empty', msg: 'Delete Branch Protection', type: 'INFO' },
+        { branch: 'forbidden', msg: 'Error: Forbidden', type: 'ERROR' }
+      ])
+      expect(github.rest.repos.updateBranchProtection).not.toHaveBeenCalled()
+      expect(github.rest.repos.deleteBranchProtection).not.toHaveBeenCalled()
     })
 
     describe('when branch protection already exists', () => {
