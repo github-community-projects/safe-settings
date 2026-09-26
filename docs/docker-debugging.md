@@ -32,6 +32,14 @@ Build the local image:
 docker build -t safe-settings:local .
 ```
 
+The image also includes the one-shot full-sync entrypoint. To preview a sync
+without applying settings or starting the webhook server:
+
+```bash
+docker run --rm --env-file ./.env --env FULL_SYNC_NOP=true \
+	safe-settings:local npm run full-sync
+```
+
 Run container in foreground with explicit runtime env and port mapping:
 
 ```bash
