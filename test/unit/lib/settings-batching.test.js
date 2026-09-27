@@ -1,6 +1,10 @@
 const Settings = require('../../../lib/settings')
 const NopCommand = require('../../../lib/nopcommand')
 const env = require('../../../lib/env')
+const Archive = require('../../../lib/plugins/archive')
+const Repository = require('../../../lib/plugins/repository')
+const Labels = require('../../../lib/plugins/labels')
+const { spawnSync } = require('child_process')
 
 describe('Repository sync batching', () => {
   let context
@@ -280,6 +284,88 @@ describe('Repository sync batching', () => {
     const check = context.octokit.rest.checks.create.mock.calls[0][0]
     expect(check.conclusion).toBe('failure')
     expect(check.output.text).toContain('first suborg failure')
+  })
+
+  it.each(['archive', 'repository', 'child'])('retains caught %s failures through real NOP processing and full-sync exit status', async stage => {
+    const repos = repositories(12)
+    const failedRepos = ['repo-0', 'repo-10']
+    const fail = repo => {
+      if (failedRepos.includes(repo.repo)) throw new Error(`${stage} failed for ${repo.repo}`)
+    }
+    context.octokit.paginate.mockResolvedValue(repos)
+    jest.spyOn(Settings.prototype, 'getSubOrgConfigs').mockResolvedValue({})
+    jest.spyOn(Settings.prototype, 'getRepoConfigs').mockResolvedValue({})
+    jest.spyOn(Settings.prototype, 'updateOrg').mockResolvedValue()
+    jest.spyOn(Settings.prototype, 'syncAppInstallations').mockResolvedValue()
+    jest.spyOn(Settings.prototype, 'syncOrgLevelRulesets').mockResolvedValue()
+    jest.spyOn(Settings.prototype, 'childPluginsList').mockReturnValue([[Labels, [], 'labels']])
+    const archive = jest.spyOn(Archive.prototype, 'getState').mockImplementation(async function () {
+      if (stage === 'archive') fail(this.repo)
+      return { shouldArchive: false, shouldUnarchive: false }
+    })
+    jest.spyOn(Repository.prototype, 'sync').mockImplementation(async function () {
+      if (stage === 'repository') fail(this.repo)
+      return []
+    })
+    const labels = jest.spyOn(Labels.prototype, 'sync').mockImplementation(async function () {
+      if (stage === 'child') fail(this.repo)
+      return [new NopCommand('Labels', this.repo, null, {
+        additions: [{ name: this.repo.repo }], modifications: [], deletions: []
+      })]
+    })
+
+    const result = await Settings.syncAll(true, context, admin, {
+      restrictedRepos: {}, repository: {}
+    }, 'main')
+
+    // Execute the real CLI entrypoint with this sync's error collection.
+    const cli = spawnSync(process.execPath, ['-e', `
+      const fs = require('fs')
+      const vm = require('vm')
+      const settings = JSON.parse(fs.readFileSync(0, 'utf8'))
+      vm.runInNewContext(fs.readFileSync(process.argv[1], 'utf8'), {
+        require: name => {
+          if (name === './') return () => ({ syncInstallation: async () => settings })
+          if (name === './lib/env') return { FULL_SYNC_NOP: true }
+          if (name === 'probot') return { createProbot: () => ({ log: console }) }
+          throw new Error('Unexpected dependency: ' + name)
+        },
+        process,
+        console
+      })
+    `, require.resolve('../../../full-sync')], {
+      input: JSON.stringify({ errors: result.errors }),
+      encoding: 'utf8'
+    })
+    expect(cli.status).toBe(1)
+    expect(cli.stderr).toContain('Errors occurred during full sync.')
+    expect(cli.stdout).not.toContain('Full sync completed successfully.')
+
+    expect(archive).toHaveBeenCalledTimes(12)
+    expect(labels.mock.instances.at(-1).repo).toEqual({ owner: admin.owner, repo: 'repo-11' })
+    expect(result.processedRepoNames).toEqual(new Set(repos.map(repo => repo.name)))
+    expect(result.repo).toBe(admin)
+    expect(result.errors).toEqual(failedRepos.map(repo => ({
+      owner: admin.owner, repo, plugin: 'Settings', msg: `Error: ${stage} failed for ${repo}`
+    })))
+    expect(result.results.filter(row => row.type === 'ERROR')).toEqual(
+      result.errors.map(error => new NopCommand('Settings', error, null, error.msg, 'ERROR'))
+    )
+    expect(result.results.filter(row => row.plugin === 'Labels').map(row => row.repo))
+      .toEqual(repos.filter(repo => !failedRepos.includes(repo.name)).map(repo => repo.name))
+    expect(context.log.error.mock.calls).toEqual(result.errors.map(error => [error.msg]))
+
+    context.payload.repository = { owner: { login: admin.owner }, name: admin.repo }
+    context.payload.check_run = { id: 42, check_suite: { pull_requests: [{ number: 1 }] } }
+    jest.replaceProperty(env, 'CREATE_PR_COMMENT', 'true')
+    await result.handleResults()
+    const check = context.octokit.rest.checks.update.mock.calls[0][0]
+    const comment = context.octokit.rest.issues.createComment.mock.calls[0][0]
+    expect(check.conclusion).toBe('failure')
+    for (const output of [check.output.summary, comment.body]) {
+      for (const repo of failedRepos) expect(output).toContain(`**${repo}**`)
+      expect(output).toContain('repo-11')
+    }
   })
 
   it.each([false, true])('keeps logError default attribution (nop=%s)', nop => {
