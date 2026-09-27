@@ -10,6 +10,14 @@ Follow the [Create the GitHub App](deploy.md#create-the-github-app) guide to cre
 ## Defining the GitHub Action Workflow
 Running a full-sync with `safe-settings` can be done via `npm run full-sync`. This requires installing Node, such as with [actions/setup-node](https://github.com/actions/setup-node) (see example below). When doing so, the appropriate environment variables must be set (see the [Environment variables](#environment-variables) document for more details).
 
+Installation repositories are processed in batches of up to ten, with each batch
+settling before the next starts. A repository failure does not stop later
+repositories from being processed. Failures are logged with the repository name
+and retained in the sync errors, so a partial failure still produces a failed
+check and a nonzero full-sync exit status. Dry runs report these errors alongside
+planned changes. The same batching applies when scanning installation repositories
+for suborg configuration changes; existing repository restrictions still apply.
+
 
 ### Example GHA Workflow
 The below example uses the GHA "cron" feature to run a full-sync every 4 hours. While not required, this example uses the `.github` repo as the `admin` repo (set via `ADMIN_REPO` env var) and the safe-settings configurations are stored in the `safe-settings/` directory (set via `CONFIG_PATH` and `DEPLOYMENT_CONFIG_FILE`).
