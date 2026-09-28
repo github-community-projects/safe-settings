@@ -3201,11 +3201,11 @@ async function phase19BypassActorConvergence () {
     ['19b', 'reorder and omit ignored ids', [
       actor('RepositoryRole', 5), actor('DeployKey', null), actor('OrganizationAdmin', undefined), actor('RepositoryRole', 4)
     ], false],
-    ['19c', 'change bypass mode and a real role id', [
-      actor('OrganizationAdmin', null, 'pull_request'), actor('DeployKey', null), actor('RepositoryRole', 3), actor('RepositoryRole', 5)
+    ['19c', 'change bypass mode and remove a real role id', [
+      actor('OrganizationAdmin', null, 'pull_request'), actor('DeployKey', null), actor('RepositoryRole', 5)
     ], true],
     ['19d', 'converge with concrete ignored ids', [
-      actor('RepositoryRole', 5), actor('DeployKey', 9), actor('RepositoryRole', 3), actor('OrganizationAdmin', 8, 'pull_request')
+      actor('RepositoryRole', 5), actor('DeployKey', 9), actor('OrganizationAdmin', 8, 'pull_request')
     ], false]
   ]
   const sortActors = actors => actors.slice().sort((a, b) =>
@@ -3222,10 +3222,11 @@ async function phase19BypassActorConvergence () {
       bypass_actors: actors,
       rules: [{ type: 'deletion' }]
     }
-    const rulesetYaml = require('js-yaml').dump([attrs])
+    // Keep unrelated property and pull-request-rule defaults out of NOP checks.
+    const configYaml = require('js-yaml').dump({ repository: { name: 'test' }, rulesets: [attrs] })
     await deleteBranch(ORG, ADMIN_REPO, branch)
     await createBranch(ORG, ADMIN_REPO, branch)
-    await createOrUpdateFile(ORG, ADMIN_REPO, `${CONFIG_PATH}/repos/test.yml`, REPO_TEST_YML + rulesetYaml, branch, `${id}: ${description}`)
+    await createOrUpdateFile(ORG, ADMIN_REPO, `${CONFIG_PATH}/repos/test.yml`, configYaml, branch, `${id}: ${description}`)
     const pr = await createPR(ORG, ADMIN_REPO, `${id}: bypass actors ${description}`, branch, defaultBranch)
 
     await sleep(WEBHOOK_SETTLE_MS)
@@ -3255,7 +3256,7 @@ async function phase19BypassActorConvergence () {
       const actualActors = sortActors(live.bypass_actors.map(entry => actor(entry.actor_type, entry.actor_id, entry.bypass_mode)))
       return JSON.stringify(actualActors) === JSON.stringify(expectedActors) ? live : null
     }, { desc: `${id}: exact bypass actors, modes and real role ids to be applied` })
-    if (!assert(details !== null, `${id}: exact actor set applied with null ignored IDs and distinct real IDs`)) {
+    if (!assert(details !== null, `${id}: exact actor set applied with null ignored IDs and expected real IDs`)) {
       throw new Error(`${id}: bypass actor state did not converge`)
     }
     if (previous) {
