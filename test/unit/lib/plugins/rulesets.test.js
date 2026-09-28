@@ -188,6 +188,70 @@ describe('Rulesets', () => {
     })
   })
 
+  describe.each(['repo', 'org'])('identifier-less bypass actors (%s scope)', scope => {
+    const actor = (actorType, actorId, bypassMode = 'always') => ({ actor_type: actorType, actor_id: actorId, bypass_mode: bypassMode })
+    const policy = bypassActors => ({
+      name: 'Bypass policy',
+      target: 'branch',
+      enforcement: 'active',
+      conditions: { ref_name: { include: ['~ALL'], exclude: [] } },
+      bypass_actors: bypassActors,
+      rules: []
+    })
+
+    it.each([false, true])('converges without mutating config or scheduling an update (nop=%p)', async nop => {
+      const attrs = policy([actor('DeployKey', 123), actor('OrganizationAdmin', 1), actor('Integration', 42)])
+      const before = structuredClone(attrs)
+      const existing = { ...policy([actor('Integration', 42), actor('OrganizationAdmin', null), actor('DeployKey', null)]), id: 7 }
+      const plugin = configure([attrs], scope, nop)
+      plugin.find = jest.fn().mockResolvedValue([existing])
+
+      expect(plugin.changed(existing, attrs)).toBe(false)
+      expect(await plugin.sync()).toBeUndefined()
+      expect(plugin.hasChanges).toBe(false)
+      expect(github.request).not.toHaveBeenCalled()
+      expect(attrs).toEqual(before)
+    })
+
+    it.each([false, true])('updates a real bypass_mode change and then converges (nop=%p)', async nop => {
+      const attrs = policy([actor('DeployKey', 123, 'pull_request'), actor('OrganizationAdmin', 1)])
+      const existing = { ...policy([actor('OrganizationAdmin', null), actor('DeployKey', null)]), id: 7 }
+      const plugin = configure([attrs], scope, nop)
+      plugin.find = jest.fn().mockResolvedValue([existing])
+
+      expect(plugin.changed(existing, attrs)).toBe(true)
+      const result = await plugin.sync()
+      expect(plugin.hasChanges).toBe(true)
+      const route = scope === 'org' ? 'PUT /orgs/{org}/rulesets/{id}' : 'PUT /repos/{owner}/{repo}/rulesets/{id}'
+      if (nop) {
+        expect(github.request).not.toHaveBeenCalled()
+        expect(result.flat().filter(command => command.action.msg === 'Update Ruleset')).toHaveLength(1)
+        expect(github.request.endpoint).toHaveBeenCalledWith(route, expect.objectContaining({ id: 7, bypass_actors: attrs.bypass_actors }))
+      } else {
+        expect(github.request).toHaveBeenCalledTimes(1)
+        expect(github.request).toHaveBeenCalledWith(route, expect.objectContaining({ id: 7, bypass_actors: attrs.bypass_actors }))
+      }
+
+      plugin.find.mockResolvedValue([{ ...existing, bypass_actors: [actor('OrganizationAdmin', null), actor('DeployKey', null, 'pull_request')] }])
+      github.request.mockClear()
+      expect(await plugin.sync()).toBeUndefined()
+      expect(plugin.hasChanges).toBe(false)
+      expect(github.request).not.toHaveBeenCalled()
+    })
+
+    it('converges after resolving a team alias alongside an ignored DeployKey id', async () => {
+      github.rest.teams = { getByName: jest.fn().mockResolvedValue({ data: { id: 42 } }) }
+      const attrs = policy([{ name: 'developers', actor_type: 'Team', bypass_mode: 'always' }, actor('DeployKey', 123)])
+      const plugin = configure([attrs], scope, true)
+      plugin.find = jest.fn().mockResolvedValue([{ ...policy([actor('DeployKey', null), actor('Team', 42)]), id: 7 }])
+
+      expect(await plugin.sync()).toBeUndefined()
+      expect(plugin.hasChanges).toBe(false)
+      expect(github.rest.teams.getByName).toHaveBeenCalledWith({ org: 'jitran', team_slug: 'developers' })
+      expect(github.request).not.toHaveBeenCalled()
+    })
+  })
+
   describe('idempotent create when the ruleset already exists (retried/concurrent POST)', () => {
     function duplicateNameError () {
       const e = new Error('Validation Failed')

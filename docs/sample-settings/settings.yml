@@ -253,6 +253,7 @@ rulesets:
         # - Team
         # - Integration
         # - OrganizationAdmin
+        # - DeployKey
         actor_type: Team
         #  When the specified actor can bypass the ruleset. `pull_request`
         #  means that an actor can only bypass rules on pull requests.
@@ -260,7 +261,9 @@ rulesets:
         #  - pull_request
         bypass_mode: pull_request
 
-      - actor_id: 1
+      # GitHub ignores actor_id for OrganizationAdmin and DeployKey and returns
+      # null. Use null (or omit actor_id) for these actor types.
+      - actor_id: null
         actor_type: OrganizationAdmin
         bypass_mode: always
 
