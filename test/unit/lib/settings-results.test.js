@@ -1,5 +1,6 @@
 const Settings = require('../../../lib/settings')
 const Branches = require('../../../lib/plugins/branches')
+const Rulesets = require('../../../lib/plugins/rulesets')
 const NopCommand = require('../../../lib/nopcommand')
 const env = require('../../../lib/env')
 
@@ -142,6 +143,46 @@ describe('Settings result deduplication', () => {
     for (const output of [check.output.summary, comment.body]) {
       expect(output.match(/Plugin 'labels' skipped/g)).toHaveLength(1)
       expect(output.match(/Plugin 'teams' skipped/g)).toHaveLength(1)
+    }
+  })
+
+  it.each(['first', 'subsequent'])('preserves %s ruleset array additions through NOP, check-run and PR reporting', async stage => {
+    const added = { name: 'new-policy', target: 'branch', enforcement: 'active', rules: [{ type: 'deletion' }] }
+    const existing = stage === 'first'
+      ? []
+      : [{ id: 42, name: 'existing-policy', target: 'branch', enforcement: 'active', source_type: 'Repository', rules: [] }]
+    context.octokit.paginate = jest.fn().mockResolvedValue(existing)
+    context.octokit.request = jest.fn()
+    context.octokit.request.endpoint = Object.assign(
+      jest.fn((url, body) => ({ url, body })),
+      { merge: jest.fn((url, params) => ({ url, ...params })) }
+    )
+    const entries = [...existing, added]
+    const snapshot = structuredClone(entries)
+    const plugin = new Rulesets(true, context.octokit, repo, entries, context.log, [])
+    const results = (await plugin.sync()).flat()
+    const summary = results.find(row => row.action.msg === 'Changes found')
+
+    expect(summary.action).toEqual({
+      msg: 'Changes found', additions: [added], modifications: [], deletions: []
+    })
+    expect(plugin.hasChanges).toBe(true)
+    expect(results.map(row => row.action.msg)).toEqual(['Changes found', 'Create Ruleset'])
+    expect(results[1].body).toMatchObject(added)
+    expect(entries).toEqual(snapshot)
+    expect(context.octokit.request).not.toHaveBeenCalled()
+    settings.appendToResults(results)
+
+    await settings.handleResults()
+
+    expect(settings.results).toEqual(results)
+    const check = context.octokit.rest.checks.update.mock.calls[0][0]
+    const comment = context.octokit.rest.issues.createComment.mock.calls[0][0]
+    for (const output of [check.output.summary, comment.body]) {
+      expect(output).toContain('1 repo, 1 policy changed')
+      expect(output).toContain('`new-policy`')
+      expect(output).not.toContain('`0.')
+      expect(output).not.toContain('existing-policy')
     }
   })
 

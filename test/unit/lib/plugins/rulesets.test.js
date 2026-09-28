@@ -177,8 +177,14 @@ describe('Rulesets', () => {
       const summary = flat.find(command => command.plugin === 'Rulesets' && command.action?.msg === 'Changes found')
 
       expect(flat.some(command => command.type === 'ERROR')).toBe(false)
-      expect(summary.action.additions['0']).toEqual(expect.objectContaining({ name: 'All branches' }))
-      expect(summary.action.deletions).toBeUndefined()
+      expect(summary.action).toEqual({
+        msg: 'Changes found',
+        additions: plugin.entries,
+        modifications: [],
+        deletions: []
+      })
+      expect(plugin.hasChanges).toBe(true)
+      expect(github.request).not.toHaveBeenCalled()
     })
   })
 
