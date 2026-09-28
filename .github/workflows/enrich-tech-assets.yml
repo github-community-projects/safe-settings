@@ -1,0 +1,74 @@
+# Alternative Approach: GitHub Actions Pre-Processor
+# 
+# If you prefer not to modify safe-settings core code, you can use a GitHub Actions
+# workflow that runs BEFORE safe-settings to enrich YAML files.
+
+name: Enrich Tech Asset Configuration
+
+on:
+  pull_request:
+    paths:
+      - '.github/repos/**.yml'
+      - '.github/repos/**.yaml'
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/repos/**.yml'
+      - '.github/repos/**.yaml'
+
+jobs:
+  enrich-config:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          npm install js-yaml node-fetch
+
+      - name: Enrich configurations
+        env:
+          TECH_ASSET_SERVICE_URL: ${{ secrets.TECH_ASSET_SERVICE_URL }}
+          TECH_ASSET_SERVICE_TOKEN: ${{ secrets.TECH_ASSET_SERVICE_TOKEN }}
+        run: |
+          node .github/scripts/enrich-tech-assets.js
+
+      - name: Commit enriched configs
+        if: github.event_name == 'pull_request'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add .github/repos/
+          git diff-index --quiet HEAD || git commit -m "chore: enrich tech asset metadata"
+          git push
+
+      - name: Add PR comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const enrichmentLog = fs.existsSync('.tech-asset-enrichment.log') 
+              ? fs.readFileSync('.tech-asset-enrichment.log', 'utf8')
+              : 'No changes';
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## 🔍 Tech Asset Enrichment\n\n${enrichmentLog}`
+            });
