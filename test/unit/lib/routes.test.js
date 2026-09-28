@@ -4,8 +4,6 @@ const request = require('supertest');
 const express = require('express');
 
 const { setupRoutes } = require('../../../lib/routes');
-const axios = require('axios');
-jest.mock('axios');
 jest.mock('../../../lib/installationCache', () => ({
   getInstallations: jest.fn(),
   getOrgLogins: jest.fn(() => ['jetest99', 'jefeish-training']),
@@ -87,13 +85,11 @@ describe('GET /api/safe-settings/installation', () => {
 describe('GET /api/safe-settings/hub/content', () => {
 
   it('should return hub content', async () => {
-    axios.get.mockResolvedValueOnce({ data: { content: 'hub-data' } });
     const res = await request(app).get('/api/safe-settings/hub/content');
     expect([200, 404, 500]).toContain(res.statusCode);
     expect(res.body).toBeDefined();
   });
   it('should handle API errors', async () => {
-    axios.get.mockRejectedValueOnce(new Error('API down'));
     const res = await request(app).get('/api/safe-settings/hub/content');
     expect([500, 404]).toContain(res.statusCode);
   });
