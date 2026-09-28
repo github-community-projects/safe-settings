@@ -217,6 +217,19 @@ custom_properties:
   - name: test
     value: test
 
+# Alternatively, preserve selected values owned by other automation.
+# Exclusions are case-insensitive regexes, not globs. Includes take precedence.
+# Other undeclared values are cleared (set to null).
+# custom_properties:
+#   include:
+#     - name: environment
+#       value: production
+#   exclude:
+#     - name: '^external-'
+#     - name: '^OWNER$'
+# Include/exclude lists merge across org, suborg and repo layers.
+# Invalid objects or patterns report a per-repo error and suppress all clears.
+
 # See the docs (https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/managing-repository-settings/configuring-autolinks-to-reference-external-resources) for a description of autolinks and replacement values.
 autolinks:
   - key_prefix: "JIRA-"

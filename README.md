@@ -644,6 +644,62 @@ disable_plugins:
     target: all
 ```
 
+### Preserving unmanaged custom properties
+
+The legacy `custom_properties` list enforces declared values and clears
+undeclared values by setting them to `null`; GitHub does not delete the property
+definition. To preserve values owned by other automation while still clearing
+other undeclared values, use the object form:
+
+```yaml
+custom_properties:
+  include:
+    - name: environment
+      value: production
+    - property_name: services
+      value: [api, worker]
+  exclude:
+    - name: '^external-'
+    - name: '^OWNER$'
+```
+
+`include`, `exclude`, or both may be specified. Exclusions are case-insensitive
+JavaScript regular expressions, **not globs**; use `.*`, not `*`, to match all
+names. Regex escapes and character classes retain their normal meaning. Included
+properties take precedence over exclusions, including an explicit `value: null`
+to clear a value. An exclude-only object preserves matching properties and
+clears unmatched properties. Protected properties are omitted from dry-run
+deletions and commands, not merely skipped at apply time.
+
+Org, suborg and repo layers can mix the list and object forms. When any active
+layer uses the object form, includes merge by case-insensitive property name
+(`name` and `property_name` are aliases), and the more specific layer replaces
+the complete value, including a multi-value array. Exclusions accumulate across
+layers; an included property can override an inherited exclusion. Empty lists
+do not remove inherited entries or patterns. A `custom_properties: null` layer
+resets inherited custom-property configuration. All-list configurations retain
+their existing merge behavior.
+
+Malformed objects, invalid include values, and invalid exclusion entries or
+regexes are recorded as per-repository configuration errors without aborting
+other repositories. No values are cleared for that repository; valid non-null
+included values can still be applied. Schema validation is an authoring aid,
+not a replacement for these runtime safeguards.
+
+`additive_plugins: [custom_properties]` remains the simpler option to suppress
+**all** undeclared-value clears. It still allows declared values to be applied.
+`disable_plugins` strips the configured layers before includes and exclusions
+are merged, using its existing target semantics.
+
+Smoke phase **20** verifies selective preservation, exact create/update/clear
+values, include precedence, exclude-only reconciliation, case-insensitive regex
+escapes, invalid-regex NOP failure, and real-Octokit dry-run PATCH commands.
+It creates a dedicated `smoke-property-exclusions` repo and
+`smoke-exclusion-*` property definitions, refuses pre-existing fixtures, and
+removes its owned resources afterward. Run with `npm run smoke-test:phase -- 20`
+only in a dedicated test organization; the harness also runs its normal setup
+and teardown.
+
 ### Additive plugins (`additive_plugins`)
 
 `additive_plugins` is the complementary "soft mode" to `disable_plugins`. When a

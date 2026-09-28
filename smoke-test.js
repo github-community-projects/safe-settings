@@ -3185,6 +3185,183 @@ async function phase18TeamIncludeExclude () {
   await deleteBranch(ORG, ADMIN_REPO, branch)
 }
 
+async function phase20CustomPropertyExclusions () {
+  logPhase('Phase 20: Custom property exclusions')
+  const repo = 'smoke-property-exclusions'
+  const prefix = 'smoke-exclusion-'
+  const names = ['managed', 'created', 'externalabc', 'external123', 'explicit-clear'].map(name => prefix + name)
+  const branches = []
+  const pullRequests = []
+  const createdProperties = []
+  const configPath = `${CONFIG_PATH}/repos/${repo}.yml`
+  const defaultBranch = await getDefaultBranch()
+  let createdRepo = false
+  let createdConfig = false
+  let invalidPR
+
+  const readValues = async () => {
+    const values = await octokit.paginate('GET /repos/{owner}/{repo}/properties/values', { owner: ORG, repo, per_page: 100 })
+    return Object.fromEntries(values.map(property => [property.property_name, property.value]))
+  }
+  const verifyValues = async (expected, label) => {
+    const matched = await poll(async () => {
+      const values = await readValues()
+      return Object.entries(expected).every(([name, value]) => (values[prefix + name] ?? null) === value)
+    }, { desc: label, timeout: 60000 })
+    if (!assert(!!matched, label)) throw new Error(label)
+  }
+  const config = customProperties => {
+    const yaml = require('js-yaml')
+    return yaml.dump({
+      repository: { name: repo, private: true },
+      custom_properties: customProperties
+    })
+  }
+  const publish = async (suffix, content, conclusion = 'success') => {
+    const branch = `smoke-test-phase20-${suffix}`
+    await createBranch(ORG, ADMIN_REPO, branch)
+    branches.push(branch)
+    await createOrUpdateFile(ORG, ADMIN_REPO, configPath, content, branch, `20: ${suffix}`)
+    const pr = await createPR(ORG, ADMIN_REPO, `20: custom property ${suffix}`, branch, defaultBranch)
+    pullRequests.push(pr.number)
+    if (conclusion === 'failure') invalidPR = pr.number
+    await sleep(WEBHOOK_SETTLE_MS)
+    const checkRun = await waitForCheckRun(ORG, ADMIN_REPO, pr.head.sha)
+    if (!assert(checkRun?.conclusion === conclusion, `20 ${suffix}: NOP check concludes ${conclusion}`)) {
+      throw new Error(`20 ${suffix}: NOP check did not conclude ${conclusion}`)
+    }
+    return { pr, checkRun }
+  }
+
+  // Refuse collisions rather than taking ownership of pre-existing resources.
+  try {
+    await octokit.rest.repos.get({ owner: ORG, repo })
+    logFail(`Phase 20 fixture repo ${repo} already exists`)
+    throw new Error(`Phase 20 fixture repo ${repo} already exists`)
+  } catch (error) {
+    if (error.status !== 404) throw error
+  }
+  const { data: definitions } = await octokit.request('GET /orgs/{org}/properties/schema', { org: ORG })
+  if (definitions.some(property => names.includes(property.property_name))) {
+    logFail('Phase 20 fixture property definitions already exist')
+    throw new Error('Phase 20 fixture property definitions already exist')
+  }
+  try {
+    await octokit.rest.repos.getContent({ owner: ORG, repo: ADMIN_REPO, path: configPath, ref: defaultBranch })
+    logFail(`Phase 20 fixture config ${configPath} already exists`)
+    throw new Error(`Phase 20 fixture config ${configPath} already exists`)
+  } catch (error) {
+    if (error.status !== 404) throw error
+  }
+
+  try {
+    for (const name of names) {
+      await octokit.request('PUT /orgs/{org}/properties/schema/{custom_property_name}', {
+        org: ORG, custom_property_name: name, value_type: 'string', required: false
+      })
+      createdProperties.push(name)
+    }
+    await octokit.rest.repos.createInOrg({ org: ORG, name: repo, private: true, auto_init: true })
+    createdRepo = true
+    await sleep(WEBHOOK_SETTLE_MS)
+    await octokit.request('PATCH /repos/{owner}/{repo}/properties/values', {
+      owner: ORG,
+      repo,
+      properties: [
+        { property_name: prefix + 'managed', value: 'old' },
+        { property_name: prefix + 'externalabc', value: 'keep' },
+        { property_name: prefix + 'external123', value: 'clear' },
+        { property_name: prefix + 'explicit-clear', value: 'clear' }
+      ]
+    })
+    const initial = { managed: 'old', created: null, externalabc: 'keep', external123: 'clear', 'explicit-clear': 'clear' }
+    await verifyValues(initial, '20: seeded fixture values are exact')
+
+    const desired = {
+      include: [
+        { name: prefix + 'managed', value: 'new' },
+        { property_name: prefix + 'created', value: 'created' },
+        { name: prefix + 'explicit-clear', value: null }
+      ],
+      exclude: [
+        { name: '^SMOKE-EXCLUSION-EXTERNAL\\D+$' },
+        { name: '^SMOKE-EXCLUSION-(MANAGED|EXPLICIT-CLEAR)$' }
+      ]
+    }
+    const { pr, checkRun } = await publish('apply', config(desired))
+    const output = `${checkRun.output?.summary || ''}\n${checkRun.output?.text || ''}`
+    assert(!output.includes(prefix + 'externalabc'), '20: protected property absent from NOP summary')
+    await verifyValues(initial, '20: NOP leaves all seeded values unchanged')
+
+    // Exercise the installed Octokit endpoint builder as well as the rendered
+    // webhook report; no mocked endpoint methods or simulated API response.
+    const CustomProperties = require('./lib/plugins/custom_properties')
+    const errors = []
+    const plugin = new CustomProperties(true, octokit, { owner: ORG, repo }, desired, {
+      debug: () => {}, info: log, error: log
+    }, errors)
+    const commands = await plugin.sync()
+    assert(errors.length === 0, '20: real-Octokit NOP has no errors')
+    assert(!JSON.stringify(commands).includes(prefix + 'externalabc'), '20: protected property absent from NOP commands')
+    const patches = commands.filter(command => command.endpoint).flatMap(command => command.body.properties)
+    for (const [name, value] of Object.entries({ managed: 'new', created: 'created', external123: null, 'explicit-clear': null })) {
+      assert(patches.some(property => property.property_name === prefix + name && property.value === value),
+        `20: NOP PATCH contains exact ${name} value`)
+    }
+    if (!await safeMerge(ORG, ADMIN_REPO, pr.number)) throw new Error('20: apply PR could not be merged')
+    createdConfig = true
+    const applied = { managed: 'new', created: 'created', externalabc: 'keep', external123: null, 'explicit-clear': null }
+    await verifyValues(applied, '20: apply creates, updates and clears exact values; exclusions/include precedence honored')
+
+    await publish('invalid', config({ include: desired.include, exclude: [{ name: '*' }] }), 'failure')
+    await verifyValues(applied, '20: invalid-regex NOP leaves live values unchanged')
+    await octokit.rest.pulls.update({ owner: ORG, repo: ADMIN_REPO, pull_number: invalidPR, state: 'closed' })
+    invalidPR = undefined
+
+    const only = await publish('exclude-only', config({ exclude: [{ name: '^SMOKE-EXCLUSION-EXTERNAL\\D+$' }] }))
+    if (!await safeMerge(ORG, ADMIN_REPO, only.pr.number)) throw new Error('20: exclude-only PR could not be merged')
+    await verifyValues({ managed: null, created: null, externalabc: 'keep', external123: null, 'explicit-clear': null },
+      '20: exclude-only preserves exact match and clears other fixture values')
+    log('Phase 20 assertions completed')
+  } catch (error) {
+    logFail(`Phase 20 failed: ${error.message}`)
+    throw error
+  } finally {
+    let cleanupFailed = false
+    const cleanup = async (label, operation) => {
+      try {
+        await operation()
+      } catch (error) {
+        cleanupFailed = true
+        logFail(`Phase 20 cleanup ${label}: ${error.message}`)
+      }
+    }
+    for (const pullNumber of pullRequests) {
+      await cleanup(`PR ${pullNumber}`, async () => {
+        const { data } = await octokit.rest.pulls.get({ owner: ORG, repo: ADMIN_REPO, pull_number: pullNumber })
+        if (data.state === 'open') await octokit.rest.pulls.update({ owner: ORG, repo: ADMIN_REPO, pull_number: pullNumber, state: 'closed' })
+      })
+    }
+    if (createdConfig) {
+      await cleanup('config', async () => {
+        const { data } = await octokit.rest.repos.getContent({ owner: ORG, repo: ADMIN_REPO, path: configPath, ref: defaultBranch })
+        await octokit.rest.repos.deleteFile({
+          owner: ORG, repo: ADMIN_REPO, path: configPath, branch: defaultBranch, sha: data.sha, message: 'Clean phase 20 fixture config'
+        })
+      })
+    }
+    if (createdRepo) await cleanup('repo', () => octokit.rest.repos.delete({ owner: ORG, repo }))
+    for (const name of createdProperties) {
+      await cleanup(name, () => octokit.request('DELETE /orgs/{org}/properties/schema/{custom_property_name}', { org: ORG, custom_property_name: name }))
+    }
+    for (const branch of branches) {
+      await cleanup(branch, () => octokit.rest.git.deleteRef({ owner: ORG, repo: ADMIN_REPO, ref: `heads/${branch}` }))
+    }
+    if (cleanupFailed) throw new Error('Phase 20 fixture cleanup incomplete')
+    log('Phase 20 owned fixtures cleaned')
+  }
+}
+
 async function main () {
   const { App } = await import('octokit')
   const app = new App({ appId: APP_ID, privateKey: PRIVATE_KEY })
@@ -3253,7 +3430,8 @@ async function main () {
       ['Phase 15: Ruleset array drift', phase15RulesetArrayDrift],
       ['Phase 16: Ruleset name/slug resolution', phase16RulesetNameResolution],
       ['Phase 17: App installation management', phase17AppInstallations],
-      ['Phase 18: Team include/exclude filters', phase18TeamIncludeExclude]
+      ['Phase 18: Team include/exclude filters', phase18TeamIncludeExclude],
+      ['Phase 20: Custom property exclusions', phase20CustomPropertyExclusions]
     ]
 
     // When --phase is given, only run setup (phase 0) + the requested phase(s).
