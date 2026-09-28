@@ -3,7 +3,7 @@
 const { when } = require('jest-when')
 const Rulesets = require('../../../../lib/plugins/rulesets')
 const version = {
-  'X-GitHub-Api-Version': '2022-11-28'
+  'X-GitHub-Api-Version': '2026-03-10'
 }
 const repo_conditions = {
   ref_name: {
@@ -86,6 +86,7 @@ describe('Rulesets', () => {
   let github
   const log = jest.fn()
   log.debug = jest.fn()
+  log.info = jest.fn()
   log.error = jest.fn()
 
   function configure (config, scope = 'repo', noop = false) {
@@ -95,12 +96,14 @@ describe('Rulesets', () => {
 
   beforeEach(() => {
     github = {
-      repos: {
-        get: jest.fn().mockResolvedValue({
-          data: {
-            default_branch: 'main'
-          }
-        })
+      rest: {
+        repos: {
+          get: jest.fn().mockResolvedValue({
+            data: {
+              default_branch: 'main'
+            }
+          })
+        }
       },
       request: jest.fn().mockImplementation(() => Promise.resolve('request'))
     }
@@ -179,6 +182,84 @@ describe('Rulesets', () => {
     })
   })
 
+  describe('idempotent create when the ruleset already exists (retried/concurrent POST)', () => {
+    function duplicateNameError () {
+      const e = new Error('Validation Failed')
+      e.status = 422
+      e.response = { data: { errors: ['Name must be unique'] } }
+      return e
+    }
+
+    function wireRequest (routeResults) {
+      const calls = []
+      const request = jest.fn().mockImplementation((route, body) => {
+        calls.push({ route, body })
+        const handler = routeResults[route]
+        return handler ? handler() : Promise.resolve({ url: route })
+      })
+      request.endpoint = jest.fn().mockImplementation((route, body) => ({ url: route, body }))
+      request.endpoint.merge = jest.fn().mockImplementation((route, body) => ({ method: 'GET', url: route, ...body }))
+      github.request = request
+      return calls
+    }
+
+    it('reconciles a repo ruleset by updating the existing one on 422 "Name must be unique"', async () => {
+      const attrs = generateRequestRuleset(0, 'synk', repo_conditions, [])
+      delete attrs.id
+      const existing = generateResponseRuleset(42, 'synk', repo_conditions, [])
+      const calls = wireRequest({
+        'POST /repos/{owner}/{repo}/rulesets': () => Promise.reject(duplicateNameError())
+      })
+      github.paginate = jest.fn()
+        .mockResolvedValueOnce([{ id: 42, name: 'synk', source_type: 'Repository' }])
+        .mockResolvedValueOnce([existing])
+
+      const plugin = configure([attrs])
+      await plugin.add(attrs)
+
+      const put = calls.find(c => c.route === 'PUT /repos/{owner}/{repo}/rulesets/{id}')
+      expect(put).toBeDefined()
+      expect(put.body.id).toBe(42)
+    })
+
+    it('reconciles an org ruleset by updating the existing one on 422 "Name must be unique"', async () => {
+      const attrs = generateRequestRuleset(0, 'synk', org_conditions, [], true)
+      delete attrs.id
+      const existing = generateResponseRuleset(7, 'synk', org_conditions, [], true)
+      const calls = wireRequest({
+        'POST /orgs/{org}/rulesets': () => Promise.reject(duplicateNameError())
+      })
+      github.paginate = jest.fn()
+        .mockResolvedValueOnce([{ id: 7, name: 'synk', source_type: 'Organization' }])
+        .mockResolvedValueOnce([existing])
+
+      const plugin = configure([attrs], 'org')
+      await plugin.add(attrs)
+
+      const put = calls.find(c => c.route === 'PUT /orgs/{org}/rulesets/{id}')
+      expect(put).toBeDefined()
+      expect(put.body.id).toBe(7)
+    })
+
+    it('does not reconcile (surfaces the error) for a 422 that is not a name-uniqueness violation', async () => {
+      const attrs = generateRequestRuleset(0, 'synk', repo_conditions, [])
+      delete attrs.id
+      const other = new Error('Validation Failed')
+      other.status = 422
+      other.response = { data: { errors: ['Something else is invalid'] } }
+      const calls = wireRequest({
+        'POST /repos/{owner}/{repo}/rulesets': () => Promise.reject(other)
+      })
+      github.paginate = jest.fn()
+
+      const plugin = configure([attrs])
+      await plugin.add(attrs)
+
+      expect(github.paginate).not.toHaveBeenCalled()
+      expect(calls.some(c => c.route === 'PUT /repos/{owner}/{repo}/rulesets/{id}')).toBe(false)
+    })
+  })
+
   describe('when {{EXTERNALLY_DEFINED}} is present in "required_status_checks" and no status checks exist in GitHub', () => {
     it('it initialises the status checks with an empty list', () => {
       // Mock the GitHub API response
@@ -214,7 +295,7 @@ describe('Rulesets', () => {
   })
 
   describe('when {{EXTERNALLY_DEFINED}} is present in "required_status_checks" and status checks exist in GitHub', () => {
-    it('it retains the status checks from GitHub and everything else is reset to the safe-settings', () => {
+    it('skips the placeholder-only ruleset and updates the genuinely changed ones', () => {
       // Mock the GitHub API response
       github.paginate = jest.fn().mockResolvedValue([
         generateRequestRuleset(
@@ -277,21 +358,11 @@ describe('Rulesets', () => {
       )
 
       return plugin.sync().then(() => {
+        // Ruleset 1 only differs by the {{EXTERNALLY_DEFINED}} placeholder, which
+        // resolves to the live status checks, so it must not be updated at all.
+        expect(github.request).toHaveBeenCalledTimes(2)
         expect(github.request).toHaveBeenNthCalledWith(
           1,
-          'PUT /repos/{owner}/{repo}/rulesets/{id}',
-          generateResponseRuleset(
-            1,
-            'All branches 1',
-            repo_conditions,
-            [
-              { context: 'Custom Check 1' },
-              { context: 'Custom Check 2' }
-            ]
-          )
-        )
-        expect(github.request).toHaveBeenNthCalledWith(
-          2,
           'PUT /repos/{owner}/{repo}/rulesets/{id}',
           generateResponseRuleset(
             2,
@@ -304,7 +375,7 @@ describe('Rulesets', () => {
           )
         )
         expect(github.request).toHaveBeenNthCalledWith(
-          3,
+          2,
           'PUT /repos/{owner}/{repo}/rulesets/{id}',
           generateResponseRuleset(
             3,
@@ -395,7 +466,7 @@ describe('Rulesets', () => {
   })
 
   describe('[org] when {{EXTERNALLY_DEFINED}} is present in "required_status_checks" and status checks exist in GitHub', () => {
-    it('it retains the status checks from GitHub', () => {
+    it('reports no changes when only the placeholder differs from GitHub', () => {
       // Mock the GitHub API response
       github.paginate = jest.fn().mockResolvedValue([
         generateRequestRuleset(
@@ -428,20 +499,48 @@ describe('Rulesets', () => {
       )
 
       return plugin.sync().then(() => {
-        expect(github.request).toHaveBeenNthCalledWith(
-          1,
-          'PUT /orgs/{org}/rulesets/{id}',
-          generateResponseRuleset(
-            1,
-            'All branches 1',
-            org_conditions,
-            [
-              { context: 'Custom Check 1' },
-              { context: 'Custom Check 2' }
-            ],
-            true
-          )
-        )
+        // The placeholder resolves to the live status checks, so the ruleset is unchanged
+        expect(github.request).not.toHaveBeenCalled()
+      })
+    })
+  })
+
+  describe('in nop mode', () => {
+    beforeEach(() => {
+      github.request.endpoint = Object.assign(
+        jest.fn().mockImplementation((route, parms) => { return { url: route, body: parms } }),
+        { merge: github.request.endpoint.merge }
+      )
+    })
+
+    it('does not plan an update when {{EXTERNALLY_DEFINED}} matches the status checks in GitHub', () => {
+      github.paginate = jest.fn().mockResolvedValue([
+        generateRequestRuleset(1, 'All branches 1', repo_conditions, [{ context: 'Custom Check 1' }])
+      ])
+
+      const plugin = configure([
+        generateRequestRuleset(1, 'All branches 1', repo_conditions, [{ context: '{{EXTERNALLY_DEFINED}}' }])
+      ], 'repo', true)
+
+      return plugin.sync().then(res => {
+        // sync resolves with nothing when no changes are detected
+        const messages = (res || []).flat(2).map(nopCommand => nopCommand.action?.msg)
+        expect(messages).not.toContain('Update Ruleset')
+      })
+    })
+
+    it('still plans an update when the config genuinely differs from GitHub', () => {
+      github.paginate = jest.fn().mockResolvedValue([
+        generateRequestRuleset(1, 'All branches 1', repo_conditions, [{ context: 'Custom Check 1' }])
+      ])
+
+      const plugin = configure([
+        generateRequestRuleset(1, 'All branches 1', repo_conditions, [{ context: 'Other Check' }])
+      ], 'repo', true)
+
+      return plugin.sync().then(res => {
+        const messages = res.flat(2).map(nopCommand => nopCommand.action?.msg)
+        expect(messages).toContain('Update Ruleset')
       })
     })
   })
@@ -856,12 +955,12 @@ describe('Rulesets', () => {
     }
 
     it('resolves a Team bypass actor name to actor_id and strips the alias', async () => {
-      github.teams = { getByName: jest.fn().mockResolvedValue({ data: { id: 42 } }) }
+      github.rest.teams = { getByName: jest.fn().mockResolvedValue({ data: { id: 42 } }) }
       const plugin = configure([bypassRuleset({ name: 'my-team', actor_type: 'Team' })], 'org')
 
       await plugin.resolveNamesToIds()
 
-      expect(github.teams.getByName).toHaveBeenCalledWith({ org: 'jitran', team_slug: 'my-team' })
+      expect(github.rest.teams.getByName).toHaveBeenCalledWith({ org: 'jitran', team_slug: 'my-team' })
       expect(plugin.rulesets[0].bypass_actors[0]).toEqual({ actor_id: 42, actor_type: 'Team', bypass_mode: 'always' })
       expect(plugin.rulesets[0].bypass_actors[0].name).toBeUndefined()
     })
@@ -918,19 +1017,19 @@ describe('Rulesets', () => {
     })
 
     it('resolves a reviewer slug to id and strips the alias', async () => {
-      github.teams = { getByName: jest.fn().mockResolvedValue({ data: { id: 555 } }) }
+      github.rest.teams = { getByName: jest.fn().mockResolvedValue({ data: { id: 555 } }) }
       const plugin = configure([reviewerRuleset({ slug: 'reviewers', type: 'Team' })], 'org')
 
       await plugin.resolveNamesToIds()
 
       const reviewer = plugin.rulesets[0].rules[0].parameters.required_reviewers[0].reviewer
-      expect(github.teams.getByName).toHaveBeenCalledWith({ org: 'jitran', team_slug: 'reviewers' })
+      expect(github.rest.teams.getByName).toHaveBeenCalledWith({ org: 'jitran', team_slug: 'reviewers' })
       expect(reviewer).toEqual({ id: 555, type: 'Team' })
       expect(reviewer.slug).toBeUndefined()
     })
 
     it('caches repeated lookups so each name resolves with a single API call', async () => {
-      github.teams = { getByName: jest.fn().mockResolvedValue({ data: { id: 42 } }) }
+      github.rest.teams = { getByName: jest.fn().mockResolvedValue({ data: { id: 42 } }) }
       const plugin = configure([
         {
           name: 'Multi',
@@ -947,18 +1046,18 @@ describe('Rulesets', () => {
 
       await plugin.resolveNamesToIds()
 
-      expect(github.teams.getByName).toHaveBeenCalledTimes(1)
+      expect(github.rest.teams.getByName).toHaveBeenCalledTimes(1)
       expect(plugin.rulesets[0].bypass_actors.map(a => a.actor_id)).toEqual([42, 42])
     })
 
     it('leaves numeric actor_id untouched and makes no lookup (backward compatible)', async () => {
-      github.teams = { getByName: jest.fn() }
+      github.rest.teams = { getByName: jest.fn() }
       github.request = jest.fn()
       const plugin = configure([bypassRuleset({ actor_id: 234, actor_type: 'Team' })], 'org')
 
       await plugin.resolveNamesToIds()
 
-      expect(github.teams.getByName).not.toHaveBeenCalled()
+      expect(github.rest.teams.getByName).not.toHaveBeenCalled()
       expect(github.request).not.toHaveBeenCalled()
       expect(plugin.rulesets[0].bypass_actors[0]).toEqual({ actor_id: 234, actor_type: 'Team', bypass_mode: 'always' })
     })
@@ -981,14 +1080,14 @@ describe('Rulesets', () => {
     it('throws a clear error when a team slug cannot be resolved', async () => {
       const notFound = new Error('Not Found')
       notFound.status = 404
-      github.teams = { getByName: jest.fn().mockRejectedValue(notFound) }
+      github.rest.teams = { getByName: jest.fn().mockRejectedValue(notFound) }
       const plugin = configure([bypassRuleset({ name: 'ghost-team', actor_type: 'Team' })], 'org')
       await expect(plugin.resolveNamesToIds()).rejects.toThrow(/Unable to resolve Team slug 'ghost-team'/)
     })
 
     it('sync sends the resolved actor_id to the API', async () => {
       github.paginate = jest.fn().mockResolvedValue([])
-      github.teams = { getByName: jest.fn().mockResolvedValue({ data: { id: 42 } }) }
+      github.rest.teams = { getByName: jest.fn().mockResolvedValue({ data: { id: 42 } }) }
       const postCalls = []
       github.request = jest.fn().mockImplementation((route, body) => {
         if (route.startsWith('POST')) postCalls.push({ route, body })

@@ -2,14 +2,22 @@
 const yaml = require('js-yaml')
 const fs = require('fs')
 const cron = require('node-cron')
-const Glob = require('./lib/glob')
 const ConfigManager = require('./lib/configManager')
 const NopCommand = require('./lib/nopcommand')
 const SettingsGenerator = require('./lib/settingsGenerator')
+const AppOctokitClient = require('./lib/appOctokitClient')
 const env = require('./lib/env')
 const { setupRoutes } = require('./lib/routes')
 const { initCache } = require('./lib/installationCache')
 const { hubSyncHandler } = require('./lib/hubSyncHandler')
+const { getProxyForUrl } = require('proxy-from-env')
+const { setGlobalDispatcher, ProxyAgent } = require('undici')
+
+const baseUrl = env.GHE_HOST ? `${env.GHE_PROTOCOL || 'https'}://${env.GHE_HOST}` : 'https://api.github.com'
+const proxyAddress = getProxyForUrl(baseUrl)
+if (proxyAddress) {
+  setGlobalDispatcher(new ProxyAgent(proxyAddress))
+}
 
 let deploymentConfig
 
@@ -22,7 +30,11 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
   // Initialize installation cache (env-controlled prefetch)
   initCache(robot)
 
-  async function syncAllSettings (nop, context, repo = context.repo(), ref, baseRef, changedFiles) {
+  // Cache of enterprise slug → enterprise installation id. Keyed by slug so a
+  // cached id is never reused for a different enterprise (e.g. when the app
+  // handles events from multiple enterprises).
+  const cachedEnterpriseInstallationIds = new Map()
+  async function syncAllSettings (nop, context, repo = context.repo(), ref, baseRef, changedFiles = {}) {
     try {
       deploymentConfig = await loadYamlFileSystem()
       robot.log.debug(`deploymentConfig is ${JSON.stringify(deploymentConfig)}`)
@@ -30,6 +42,9 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
       const runtimeConfig = await configManager.loadGlobalSettingsYaml()
       const config = Object.assign({}, deploymentConfig, runtimeConfig)
       robot.log.debug(`config for ref ${ref} is ${JSON.stringify(config)}`)
+
+      // Enrich context with enterprise info for app installation management
+      await enrichContextWithEnterprise(context)
 
       // Load base branch config for NOP filtering (only show PR-introduced changes)
       let baseConfig = null
@@ -98,6 +113,9 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
       const config = Object.assign({}, deploymentConfig, runtimeConfig)
       robot.log.debug(`config for ref ${ref} is ${JSON.stringify(config)}`)
 
+      // Enrich context with enterprise info for app installation management
+      await enrichContextWithEnterprise(context)
+
       // Load base branch config for NOP filtering (only show PR-introduced changes)
       let baseConfig = null
       if (nop && baseRef) {
@@ -153,6 +171,102 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     }
   }
   /**
+   * Lists all installations of the app using a JWT-authenticated client.
+   *
+   * @returns {Promise<Array>} All app installations
+   */
+  async function listAllInstallations () {
+    const github = await robot.auth()
+    return github.paginate(
+      github.rest.apps.listInstallations.endpoint.merge({ per_page: 100 })
+    )
+  }
+
+  /**
+   * Finds the enterprise installation matching the given slug from the app's
+   * installation list. Returns null if none matches.
+   *
+   * @param {string} enterpriseSlug - Enterprise slug
+   * @returns {Promise<object|null>} The matching enterprise installation
+   */
+  async function findEnterpriseInstallation (enterpriseSlug) {
+    const installations = await listAllInstallations()
+    return installations.find(
+      i => i.target_type === 'Enterprise' && i.account && `${i.account.slug}`.toLowerCase() === enterpriseSlug.toLowerCase()
+    ) || null
+  }
+
+  /**
+   * Finds the enterprise installation for a given slug and returns an Octokit
+   * client authenticated with the enterprise installation token, along with
+   * the installation ID.
+   *
+   * Uses the cached enterprise installation ID for the given slug when
+   * available to avoid re-listing installations. The cache is keyed by
+   * enterprise slug so an id is never reused across enterprises. Returns null
+   * if no matching enterprise installation is found.
+   *
+   * @param {string} enterpriseSlug - Enterprise slug
+   * @returns {Promise<{ appGithub: object, installationId: number } | null>}
+   */
+  async function getEnterpriseAppClient (enterpriseSlug) {
+    if (!enterpriseSlug) return null
+    // Normalize the slug to lowercase for consistent cache keying
+    enterpriseSlug = enterpriseSlug.toLowerCase()
+
+    // Use the cached enterprise installation id for THIS slug if available.
+    // Keying by slug ensures a cached id is never reused for a different
+    // enterprise.
+    const cachedId = cachedEnterpriseInstallationIds.get(enterpriseSlug)
+    if (cachedId) {
+      try {
+        const appGithub = await robot.auth(cachedId)
+        return { appGithub, installationId: cachedId }
+      } catch (e) {
+        cachedEnterpriseInstallationIds.delete(enterpriseSlug)
+      }
+    }
+
+    // Find the installation targeting this enterprise
+    const enterpriseInstallation = await findEnterpriseInstallation(enterpriseSlug)
+    if (!enterpriseInstallation) {
+      return null
+    }
+    cachedEnterpriseInstallationIds.set(enterpriseSlug, enterpriseInstallation.id)
+    const enterpriseGithub = await robot.auth(enterpriseInstallation.id)
+    return { appGithub: enterpriseGithub, installationId: enterpriseInstallation.id }
+  }
+
+  /**
+   * Enriches the context with enterprise info for app installation management.
+   * Extracts enterprise slug from the webhook payload, finds the enterprise
+   * installation from the app's installation list, and creates an Octokit
+   * client authenticated with the enterprise installation token.
+   *
+   * @param {object} context - Probot context
+   */
+  async function enrichContextWithEnterprise (context) {
+    const { payload } = context
+    const slugFromPayload = (payload.enterprise && payload.enterprise.slug) ||
+      (payload.installation && payload.installation.enterprise && payload.installation.enterprise.slug)
+    const enterpriseSlug = slugFromPayload || process.env.GH_ENTERPRISE
+
+    if (!enterpriseSlug) return
+
+    context.enterpriseSlug = enterpriseSlug
+    try {
+      const result = await getEnterpriseAppClient(enterpriseSlug)
+      if (result) {
+        context.appGithub = result.appGithub
+      } else {
+        robot.log.debug(`No enterprise installation found for slug '${enterpriseSlug}'. App installation management will not be available.`)
+      }
+    } catch (e) {
+      robot.log.debug(`Could not create enterprise-authenticated client: ${e.message}`)
+    }
+  }
+
+  /**
    * Loads the deployment config file from file system
    * Do this once when the app starts and then return the cached value
    *
@@ -176,9 +290,15 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     const getMatchingFiles = (commits, type) =>
       commits.flatMap((c) => c[type].filter((file) => pattern.test(file)))
 
+    // Include 'removed' so deleting a suborg config file is detected as a
+    // change. The downstream delta logic loads the current version from the
+    // head ref (which fails for a deleted file, yielding an empty config) and
+    // diffs it against the base ref, correctly detecting removed entries such
+    // as app_installations.
     const changes = [
       ...getMatchingFiles(payload.commits, 'added'),
-      ...getMatchingFiles(payload.commits, 'modified')
+      ...getMatchingFiles(payload.commits, 'modified'),
+      ...getMatchingFiles(payload.commits, 'removed')
     ]
 
     return changes.map((file) => ({
@@ -193,9 +313,15 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     const getMatchingFiles = (commits, type) =>
       commits.flatMap((c) => c[type].filter((file) => pattern.test(file)))
 
+    // Include 'removed' so deleting a repo config file is detected as a change.
+    // The downstream delta logic loads the current version from the head ref
+    // (which fails for a deleted file, yielding an empty config) and diffs it
+    // against the base ref, correctly detecting removed entries such as
+    // app_installations.
     const changes = [
       ...getMatchingFiles(payload.commits, 'added'),
-      ...getMatchingFiles(payload.commits, 'modified')
+      ...getMatchingFiles(payload.commits, 'modified'),
+      ...getMatchingFiles(payload.commits, 'removed')
     ]
 
     return changes.map((file) => ({
@@ -228,7 +354,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
   async function createCheckRun (context, pull_request, head_sha, head_branch) {
     const { payload } = context
     // robot.log.debug(`Check suite was requested! for ${context.repo()} ${pull_request.number} ${head_sha} ${head_branch}`)
-    const res = await context.octokit.checks.create({
+    const res = await context.octokit.rest.checks.create({
       owner: payload.repository.owner.login,
       repo: payload.repository.name,
       name: 'Safe-setting validator',
@@ -238,27 +364,68 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
   }
 
   async function info () {
-    const github = await robot.auth()
-    const installations = await github.paginate(
-      github.apps.listInstallations.endpoint.merge({ per_page: 100 })
-    )
+    const installations = await listAllInstallations()
     robot.log.debug(`installations: ${JSON.stringify(installations)}`)
     if (installations.length > 0) {
       const installation = installations[0]
       const github = await robot.auth(installation.id)
-      const app = await github.apps.getAuthenticated()
+      const app = await github.rest.apps.getAuthenticated()
       appSlug = app.data.slug
-      robot.log.debug(`Validated the app is configured properly = \n${JSON.stringify(app.data, null, 2)}`)
+      robot.log.info(`Validated the app is configured properly = \n${JSON.stringify(app.data, null, 2)}`)
+    }
+
+    await verifyAppInstallationsPlugin()
+  }
+
+  /**
+   * Verifies that the app-installations plugin can function properly.
+   *
+   * When the `GH_ENTERPRISE` env variable is set, this:
+   *   1. Finds the enterprise installation matching the slug.
+   *   2. Mints an installation token for that enterprise installation.
+   *   3. Confirms the token has permission to manage app installations in the
+   *      target org (`GH_ORG`) by listing the org's app installations via the
+   *      Enterprise organization installations API.
+   *
+   * If `GH_ENTERPRISE` is not set, this verification is skipped entirely.
+   */
+  async function verifyAppInstallationsPlugin () {
+    const enterpriseSlug = process.env.GH_ENTERPRISE
+    if (!enterpriseSlug) {
+      robot.log.info('GH_ENTERPRISE is not set — skipping app-installations plugin verification')
+      return
+    }
+
+    const org = process.env.GH_ORG
+    if (!org) {
+      robot.log.warn('GH_ENTERPRISE is set but GH_ORG is not — cannot verify app-installations plugin without a target org')
+      return
+    }
+
+    try {
+      const result = await getEnterpriseAppClient(enterpriseSlug)
+      if (!result) {
+        robot.log.warn(`No enterprise installation found for slug '${enterpriseSlug}'. App-installations plugin will not be able to manage app access. Ensure safe-settings is installed on the enterprise.`)
+        return
+      }
+
+      const client = new AppOctokitClient({
+        github: result.appGithub,
+        enterpriseSlug,
+        log: robot.log
+      })
+
+      // Confirm the token can list org app installations (validates permission)
+      const orgInstallations = await client.listOrgInstallations(org)
+      robot.log.info(`App-installations plugin verified: enterprise '${enterpriseSlug}' installation (id: ${result.installationId}) can manage apps in org '${org}' (${orgInstallations.length} installation(s) visible)`)
+    } catch (e) {
+      robot.log.error(`App-installations plugin verification failed for enterprise '${enterpriseSlug}' / org '${org}': ${e.message}`)
     }
   }
 
   async function syncInstallation (nop = false) {
     robot.log.trace('Fetching installations')
-    const github = await robot.auth()
-
-    const installations = await github.paginate(
-      github.apps.listInstallations.endpoint.merge({ per_page: 100 })
-    )
+    const installations = await listAllInstallations()
 
     if (installations.length > 0) {
       const installation = installations[0]
@@ -440,7 +607,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
           repo: env.ADMIN_REPO,
           path: oldPath,
           headers: {
-            'X-GitHub-Api-Version': '2022-11-28'
+            'X-GitHub-Api-Version': '2026-03-10'
           }
         })
         let content = Buffer.from(repofile.data.content, 'base64').toString()
@@ -454,7 +621,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
             repo: env.ADMIN_REPO,
             path: newPath,
             headers: {
-              'X-GitHub-Api-Version': '2022-11-28'
+              'X-GitHub-Api-Version': '2026-03-10'
             }
           })
         } catch (error) {
@@ -469,7 +636,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
               message: `Repo Renamed and safe-settings renamed the file from ${payload.changes.repository.name.from} to ${payload.repository.name}`,
               sha: repofile.data.sha,
               headers: {
-                'X-GitHub-Api-Version': '2022-11-28'
+                'X-GitHub-Api-Version': '2026-03-10'
               }
             })
             robot.log.debug(`Created a new setting file ${newPath}`)
@@ -491,6 +658,39 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
       const repo = { repo: payload.changes.repository.name.from, owner: payload.repository.owner.login }
       return renameSync(false, context, repo, rename)
     }
+  })
+
+  // ────────────────────────────────────────────────────────────────────────
+  // App installation target handler
+  //
+  // Note: We intentionally do NOT handle `installation.repositories_added` /
+  // `installation.repositories_removed`. A GitHub App only receives those
+  // events for its OWN installation, not for the managed apps (e.g. Copilot,
+  // Dependabot) whose repository access safe-settings controls. They cannot
+  // detect drift on managed apps, so drift is reconciled by the scheduled
+  // (cron) full sync instead.
+  // ────────────────────────────────────────────────────────────────────────
+
+  robot.on('installation_target', async context => {
+    const { payload } = context
+    const { sender } = payload
+    robot.log.debug('Installation target changed by ', JSON.stringify(sender))
+    if (sender.type === 'Bot') {
+      robot.log.debug('Installation target changed by Bot')
+      return
+    }
+    robot.log.debug('Installation target changed by a Human — triggering sync to revert drift')
+
+    const orgLogin = (payload.organization && payload.organization.login) ||
+      (payload.installation && payload.installation.account && payload.installation.account.login)
+    if (!orgLogin) {
+      robot.log.debug('Could not determine org login from installation_target event, skipping')
+      return
+    }
+    const updatedContext = Object.assign({}, context, {
+      repo: () => { return { repo: env.ADMIN_REPO, owner: orgLogin } }
+    })
+    return syncAllSettings(false, updatedContext)
   })
 
   robot.on('check_suite.requested', async context => {
@@ -627,11 +827,11 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
       output: { title: 'Starting NOP', summary: 'initiating...' }
     }
     robot.log.debug(`Updating check run ${JSON.stringify(params)}`)
-    await context.octokit.checks.update(params)
+    await context.octokit.rest.checks.update(params)
 
     params = Object.assign(context.repo(), { pull_number: pull_request.number })
 
-    const changes = await context.octokit.pulls.listFiles(params)
+    const changes = await context.octokit.rest.pulls.listFiles(params)
     const files = changes.data.map(f => { return f.filename })
 
     const settingsModified = files.includes(Settings.FILE_PATH)
@@ -675,7 +875,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
       output: { title: 'No Safe-settings changes detected', summary: 'No changes detected' }
     }
     robot.log.debug(`Completing check run ${JSON.stringify(params)}`)
-    await context.octokit.checks.update(params)
+    await context.octokit.rest.checks.update(params)
   })
 
   robot.on('repository.created', async context => {
@@ -746,7 +946,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     if (overwrite) return filePath
     const { owner } = context.repo()
     try {
-      await context.octokit.repos.getContent({ owner, repo: env.ADMIN_REPO, path: filePath })
+      await context.octokit.rest.repos.getContent({ owner, repo: env.ADMIN_REPO, path: filePath })
       // File exists -> redirect to .sample
       return filePath.replace(/(\.ya?ml)$/i, '.sample$1')
     } catch (e) {
@@ -763,12 +963,12 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     const { owner } = context.repo()
     const repo = env.ADMIN_REPO
 
-    const repoInfo = await github.repos.get({ owner, repo })
+    const repoInfo = await github.rest.repos.get({ owner, repo })
     const baseBranch = repoInfo.data.default_branch
-    const baseRef = await github.git.getRef({ owner, repo, ref: `heads/${baseBranch}` })
+    const baseRef = await github.rest.git.getRef({ owner, repo, ref: `heads/${baseBranch}` })
     const branchName = `safe-settings-generate/${opts.sourceType}-${opts.sourceValue}-${Date.now()}`.replace(/[^a-zA-Z0-9/_.-]/g, '-')
 
-    await github.git.createRef({
+    await github.rest.git.createRef({
       owner,
       repo,
       ref: `refs/heads/${branchName}`,
@@ -777,13 +977,13 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
 
     let existingSha
     try {
-      const existing = await github.repos.getContent({ owner, repo, path: filePath, ref: branchName })
+      const existing = await github.rest.repos.getContent({ owner, repo, path: filePath, ref: branchName })
       existingSha = existing.data.sha
     } catch (e) {
       if (e.status !== 404) throw e
     }
 
-    await github.repos.createOrUpdateFileContents({
+    await github.rest.repos.createOrUpdateFileContents({
       owner,
       repo,
       path: filePath,
@@ -793,7 +993,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
       sha: existingSha
     })
 
-    const pr = await github.pulls.create({
+    const pr = await github.rest.pulls.create({
       owner,
       repo,
       title: `Generate safe-settings config for ${opts.sourceType}: ${opts.sourceValue}`,

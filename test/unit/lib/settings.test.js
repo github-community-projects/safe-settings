@@ -1,5 +1,5 @@
 /* eslint-disable no-undef */
-const { Octokit } = require('@octokit/core')
+class Octokit {}
 const Settings = require('../../../lib/settings')
 const yaml = require('js-yaml')
 // jest.mock('../../../lib/settings', () => {
@@ -52,8 +52,10 @@ repository:
   topics:
   - frontend
      `).toString('base64')
-    mockOctokit.repos = {
-      getContent: jest.fn().mockResolvedValue({ data: { content } })
+    mockOctokit.rest = {
+      repos: {
+        getContent: jest.fn().mockResolvedValue({ data: { content } })
+      }
     }
 
     mockOctokit.request = {
@@ -298,6 +300,172 @@ repository:
         // }
       })
     })
+
+    describe('repo-scoped suborg config resolution', () => {
+      // When syncing a single repo (not a suborg config change), getSubOrgConfigs(repo)
+      // should resolve membership by inspecting only that repo's teams/properties,
+      // instead of enumerating every repo of every suborg across the org.
+      beforeEach(() => {
+        // No suborg => subOrgConfigMap is not set => repo-scoped path is eligible
+        mockSubOrg = undefined
+        stubConfig = { restrictedRepos: {} }
+        subOrgConfig = yaml.load(`
+          suborgrepos:
+          - new-repo
+
+          suborgteams:
+          - core
+
+          suborgproperties:
+          - EDP: true
+          - do_no_delete: true
+
+          repository:
+            topics:
+            - frontend
+          `)
+      })
+
+      function createRepoScopedSettings () {
+        settings = createSettings(stubConfig)
+        jest.spyOn(settings, 'loadConfigMap').mockImplementation(() => [{ name: 'frontend', path: '.github/suborgs/frontend.yml' }])
+        jest.spyOn(settings, 'loadYaml').mockImplementation(() => subOrgConfig)
+        // org-wide resolvers should NOT be used on the repo-scoped path
+        jest.spyOn(settings, 'getReposForTeam').mockResolvedValue([{ name: 'repo-test' }])
+        jest.spyOn(settings, 'getSubOrgRepositories').mockResolvedValue([{ repository_name: 'repo-for-property' }])
+        return settings
+      }
+
+      it('matches by suborgrepos glob without any repo API calls', async () => {
+        settings = createRepoScopedSettings()
+        const getReposTeams = jest.spyOn(settings, 'getReposTeams').mockResolvedValue([])
+        const getRepoProps = jest.spyOn(settings, 'getRepoCustomPropertyValues').mockResolvedValue([])
+
+        const subOrgConfigs = await settings.getSubOrgConfigs({ owner: 'test', repo: 'new-repo' })
+
+        expect(subOrgConfigs['new-repo']).toBeDefined()
+        expect(subOrgConfigs['new-repo'].source).toEqual('.github/suborgs/frontend.yml')
+        // glob matched first, so teams/properties are never queried
+        expect(getReposTeams).not.toHaveBeenCalled()
+        expect(getRepoProps).not.toHaveBeenCalled()
+        // org-wide resolvers are never used
+        expect(settings.getReposForTeam).not.toHaveBeenCalled()
+        expect(settings.getSubOrgRepositories).not.toHaveBeenCalled()
+      })
+
+      it('matches by team membership using the repo-scoped teams endpoint', async () => {
+        settings = createRepoScopedSettings()
+        const getReposTeams = jest.spyOn(settings, 'getReposTeams').mockResolvedValue([{ slug: 'core' }])
+        const getRepoProps = jest.spyOn(settings, 'getRepoCustomPropertyValues').mockResolvedValue([])
+
+        const subOrgConfigs = await settings.getSubOrgConfigs({ owner: 'test', repo: 'some-repo' })
+
+        expect(subOrgConfigs['some-repo']).toBeDefined()
+        expect(getReposTeams).toHaveBeenCalledTimes(1)
+        // team matched, so properties are never queried
+        expect(getRepoProps).not.toHaveBeenCalled()
+        expect(settings.getReposForTeam).not.toHaveBeenCalled()
+      })
+
+      it('matches by custom property using the repo-scoped properties endpoint', async () => {
+        settings = createRepoScopedSettings()
+        const getReposTeams = jest.spyOn(settings, 'getReposTeams').mockResolvedValue([])
+        const getRepoProps = jest.spyOn(settings, 'getRepoCustomPropertyValues').mockResolvedValue([{ property_name: 'EDP', value: 'true' }])
+
+        const subOrgConfigs = await settings.getSubOrgConfigs({ owner: 'test', repo: 'some-repo' })
+
+        expect(subOrgConfigs['some-repo']).toBeDefined()
+        expect(getReposTeams).toHaveBeenCalledTimes(1)
+        expect(getRepoProps).toHaveBeenCalledTimes(1)
+        expect(settings.getSubOrgRepositories).not.toHaveBeenCalled()
+      })
+
+      it('returns no config when the repo matches nothing', async () => {
+        settings = createRepoScopedSettings()
+        jest.spyOn(settings, 'getReposTeams').mockResolvedValue([{ slug: 'other-team' }])
+        jest.spyOn(settings, 'getRepoCustomPropertyValues').mockResolvedValue([{ property_name: 'EDP', value: 'false' }])
+
+        const subOrgConfigs = await settings.getSubOrgConfigs({ owner: 'test', repo: 'some-repo' })
+
+        expect(Object.keys(subOrgConfigs)).toHaveLength(0)
+      })
+
+      it('falls back to the org-wide path when processing a suborg config change', async () => {
+        settings = createRepoScopedSettings()
+        settings.subOrgConfigMap = [{ path: '.github/suborgs/frontend.yml' }]
+        const getReposTeams = jest.spyOn(settings, 'getReposTeams').mockResolvedValue([])
+        const getRepoProps = jest.spyOn(settings, 'getRepoCustomPropertyValues').mockResolvedValue([])
+
+        await settings.getSubOrgConfigs({ owner: 'test', repo: 'new-repo' })
+
+        // org-wide resolvers are used; repo-scoped ones are not
+        expect(settings.getReposForTeam).toHaveBeenCalled()
+        expect(settings.getSubOrgRepositories).toHaveBeenCalled()
+        expect(getReposTeams).not.toHaveBeenCalled()
+        expect(getRepoProps).not.toHaveBeenCalled()
+      })
+    })
+
+    describe('repoMatchesProperties', () => {
+      beforeEach(() => {
+        mockSubOrg = undefined
+        settings = createSettings({ restrictedRepos: {} })
+      })
+
+      it('coerces YAML booleans/numbers to match the API string values', () => {
+        expect(settings.repoMatchesProperties([{ property_name: 'EDP', value: 'true' }], [{ EDP: true }])).toBe(true)
+        expect(settings.repoMatchesProperties([{ property_name: 'tier', value: '2' }], [{ tier: 2 }])).toBe(true)
+      })
+
+      it('matches property names case-insensitively', () => {
+        // GitHub may return the property name in a different case than the config declares
+        expect(settings.repoMatchesProperties([{ property_name: 'edp', value: 'true' }], [{ EDP: true }])).toBe(true)
+        expect(settings.repoMatchesProperties([{ property_name: 'EDP', value: 'true' }], [{ edp: true }])).toBe(true)
+      })
+
+      it('returns false when the property is absent or the value differs', () => {
+        expect(settings.repoMatchesProperties([{ property_name: 'EDP', value: 'false' }], [{ EDP: true }])).toBe(false)
+        expect(settings.repoMatchesProperties([], [{ EDP: true }])).toBe(false)
+      })
+
+      it('matches multi-select property values that contain the expected value', () => {
+        expect(settings.repoMatchesProperties([{ property_name: 'envs', value: ['dev', 'prod'] }], [{ envs: 'prod' }])).toBe(true)
+        expect(settings.repoMatchesProperties([{ property_name: 'envs', value: ['dev'] }], [{ envs: 'prod' }])).toBe(false)
+      })
+    })
+
+    describe('getRepoCustomPropertyValues', () => {
+      beforeEach(() => {
+        mockSubOrg = undefined
+      })
+
+      it('paginates the repo-scoped custom properties endpoint', async () => {
+        const endpoint = jest.fn()
+        stubContext.octokit.rest.repos.customPropertiesForReposGetRepositoryValues = endpoint
+        settings = createSettings({ restrictedRepos: {} })
+        stubContext.octokit.paginate.mockResolvedValue([{ property_name: 'Team', value: 'DevOps' }])
+
+        const values = await settings.getRepoCustomPropertyValues({ owner: 'test', repo: 'test-repo' })
+
+        expect(stubContext.octokit.paginate).toHaveBeenCalledWith(endpoint, {
+          owner: 'test',
+          repo: 'test-repo',
+          per_page: 100
+        })
+        expect(values).toEqual([{ property_name: 'Team', value: 'DevOps' }])
+      })
+
+      it('throws instead of paginating an undefined route when the octokit method is missing', async () => {
+        // A renamed/removed octokit method must not silently degrade: paginate(undefined, ...)
+        // requests the API root and returns junk, making every suborgproperties match fail.
+        delete stubContext.octokit.rest.repos.customPropertiesForReposGetRepositoryValues
+        settings = createSettings({ restrictedRepos: {} })
+
+        await expect(settings.getRepoCustomPropertyValues({ owner: 'test', repo: 'test-repo' }))
+          .rejects.toThrow('customPropertiesForReposGetRepositoryValues is not available')
+        expect(stubContext.octokit.paginate).not.toHaveBeenCalled()
+      })
+    })
   }) // loadConfigs
 
   describe('loadYaml', () => {
@@ -307,8 +475,10 @@ repository:
       Settings.fileCache = {}
       stubContext = {
         octokit: {
-          repos: {
-            getContent: jest.fn()
+          rest: {
+            repos: {
+              getContent: jest.fn()
+            }
           },
           request: jest.fn(),
           paginate: jest.fn()
@@ -331,7 +501,7 @@ repository:
       // Given
       const filePath = 'path/to/file.yml'
       const content = Buffer.from('key: value').toString('base64')
-      jest.spyOn(settings.github.repos, 'getContent').mockResolvedValue({
+      jest.spyOn(settings.github.rest.repos, 'getContent').mockResolvedValue({
         data: { content },
         headers: { etag: 'etag123' }
       })
@@ -352,14 +522,14 @@ repository:
       const filePath = 'path/to/file.yml'
       const content = Buffer.from('key: value').toString('base64')
       Settings.fileCache[`${mockRepo.owner}/${filePath}`] = { etag: 'etag123', data: { content } }
-      jest.spyOn(settings.github.repos, 'getContent').mockRejectedValue({ status: 304 })
+      jest.spyOn(settings.github.rest.repos, 'getContent').mockRejectedValue({ status: 304 })
 
       // When
       const result = await settings.loadYaml(filePath)
 
       // Then
       expect(result).toEqual({ key: 'value' })
-      expect(settings.github.repos.getContent).toHaveBeenCalledWith(
+      expect(settings.github.rest.repos.getContent).toHaveBeenCalledWith(
         expect.objectContaining({ headers: { 'If-None-Match': 'etag123' } })
       )
     })
@@ -370,7 +540,7 @@ repository:
       const content = Buffer.from('key: value').toString('base64')
       const wrongContent = Buffer.from('wrong: content').toString('base64')
       Settings.fileCache['another-org/path/to/file.yml'] = { etag: 'etag123', data: { wrongContent } }
-      jest.spyOn(settings.github.repos, 'getContent').mockResolvedValue({
+      jest.spyOn(settings.github.rest.repos, 'getContent').mockResolvedValue({
         data: { content },
         headers: { etag: 'etag123' }
       })
@@ -385,7 +555,7 @@ repository:
     it('should return null when the file path is a folder', async () => {
       // Given
       const filePath = 'path/to/folder'
-      jest.spyOn(settings.github.repos, 'getContent').mockResolvedValue({
+      jest.spyOn(settings.github.rest.repos, 'getContent').mockResolvedValue({
         data: []
       })
 
@@ -399,7 +569,7 @@ repository:
     it('should return null when the file is a symlink or submodule', async () => {
       // Given
       const filePath = 'path/to/symlink'
-      jest.spyOn(settings.github.repos, 'getContent').mockResolvedValue({
+      jest.spyOn(settings.github.rest.repos, 'getContent').mockResolvedValue({
         data: { content: null }
       })
 
@@ -413,7 +583,7 @@ repository:
     it('should handle 404 errors gracefully and return null', async () => {
       // Given
       const filePath = 'path/to/nonexistent.yml'
-      jest.spyOn(settings.github.repos, 'getContent').mockRejectedValue({ status: 404 })
+      jest.spyOn(settings.github.rest.repos, 'getContent').mockRejectedValue({ status: 404 })
 
       // When
       const result = await settings.loadYaml(filePath)
@@ -425,7 +595,7 @@ repository:
     it('should throw an error for non-404 exceptions when not in nop mode', async () => {
       // Given
       const filePath = 'path/to/error.yml'
-      jest.spyOn(settings.github.repos, 'getContent').mockRejectedValue(new Error('Unexpected error'))
+      jest.spyOn(settings.github.rest.repos, 'getContent').mockRejectedValue(new Error('Unexpected error'))
 
       // When / Then
       await expect(settings.loadYaml(filePath)).rejects.toThrow('Unexpected error')
@@ -435,7 +605,7 @@ repository:
       // Given
       const filePath = 'path/to/error.yml'
       settings.nop = true
-      jest.spyOn(settings.github.repos, 'getContent').mockRejectedValue(new Error('Unexpected error'))
+      jest.spyOn(settings.github.rest.repos, 'getContent').mockRejectedValue(new Error('Unexpected error'))
       jest.spyOn(settings, 'appendToResults')
 
       // When
@@ -452,9 +622,9 @@ repository:
             })
           })
         ])
-      );
-    });
-  });
+      )
+    })
+  })
 
   describe('getAllMatchingSubOrgSources', () => {
     it('returns an empty set when subOrgConfigs is undefined', () => {
@@ -1054,11 +1224,40 @@ repository:
         expect(msgs.some(m => /teams/.test(m))).toBe(true)
       })
 
+      it.each([
+        ['without a check run', {}],
+        ['without a repository', { check_run: { id: 123 } }]
+      ])('28. full-sync dry run %s logs a value-free summary instead of updating a check run', async (_description, payload) => {
+        stubContext.payload = { installation: { id: 123 }, ...payload }
+        stubContext.octokit.checks = { update: jest.fn().mockResolvedValue({}) }
+
+        const settings = new Settings(true, stubContext, mockRepo, {}, mockRef)
+        settings.results = [{
+          type: 'INFO',
+          plugin: 'Variables',
+          repo: 'test/test-repo',
+          endpoint: '',
+          action: {
+            msg: 'Changes found',
+            additions: {},
+            modifications: { MY_VAR: { value: 'plain-value' } },
+            deletions: {}
+          }
+        }]
+
+        await settings.handleResults()
+
+        expect(stubContext.log.info).toHaveBeenCalledWith(expect.stringContaining('Changes found'))
+        expect(stubContext.log.info).not.toHaveBeenCalledWith(expect.stringContaining('plain-value'))
+        expect(stubContext.log.debug).toHaveBeenCalledWith({ results: settings.results }, 'Dry-run results')
+        expect(stubContext.octokit.checks.update).not.toHaveBeenCalled()
+      })
+
       it('28. base-config filtering preserves org-rulesets informational NopCommands', async () => {
         stubContext.payload.repository = { owner: { login: 'test' }, name: 'safe-settings' }
         stubContext.payload.check_run = { id: 123, check_suite: { pull_requests: [{ number: 456 }] } }
-        stubContext.octokit.checks = { update: jest.fn().mockResolvedValue({}) }
-        stubContext.octokit.issues = { createComment: jest.fn().mockResolvedValue({}) }
+        stubContext.octokit.rest.checks = { update: jest.fn().mockResolvedValue({}) }
+        stubContext.octokit.rest.issues = { createComment: jest.fn().mockResolvedValue({}) }
 
         const settings = new Settings(true, stubContext, mockRepo, {
           rulesets: [{ name: 'managed', enforcement: 'disabled' }]
@@ -1081,8 +1280,8 @@ repository:
 
         await settings.handleResults()
 
-        expect(stubContext.octokit.checks.update).toHaveBeenCalled()
-        const summary = stubContext.octokit.checks.update.mock.calls[0][0].output.summary
+        expect(stubContext.octokit.rest.checks.update).toHaveBeenCalled()
+        const summary = stubContext.octokit.rest.checks.update.mock.calls[0][0].output.summary
         expect(summary).toMatch(/Informational messages/)
         expect(summary).toMatch(/suppressed by additive_plugins/)
       })
@@ -1093,11 +1292,11 @@ repository:
   describe('additive_plugins', () => {
     // ── Settings.ADDITIVE_PLUGINS constant ───────────────────────────────
     describe('Settings.ADDITIVE_PLUGINS', () => {
-      it('28. contains all 10 Diffable-extending plugin names', () => {
+      it('28. contains all 11 additive plugin names', () => {
         const expected = new Set([
           'labels', 'collaborators', 'teams', 'milestones', 'autolinks',
           'environments', 'custom_properties', 'variables', 'rulesets',
-          'custom_repository_roles'
+          'custom_repository_roles', 'app_installations'
         ])
         expect(Settings.ADDITIVE_PLUGINS).toEqual(expected)
       })
@@ -1123,12 +1322,12 @@ repository:
         expect(result).toEqual(new Set(['labels', 'teams', 'milestones']))
       })
 
-      it('32. all 10 Diffable plugins are accepted without error', () => {
+      it('32. all 11 additive plugins are accepted without error', () => {
         const all = [...Settings.ADDITIVE_PLUGINS]
         const settings = createSettings({ additive_plugins: all })
         const logErrorSpy = jest.spyOn(settings, 'logError').mockImplementation(() => {})
         const result = settings.normalizeAdditivePlugins()
-        expect(result.size).toBe(10)
+        expect(result.size).toBe(11)
         expect(logErrorSpy).not.toHaveBeenCalled()
         logErrorSpy.mockRestore()
       })
@@ -1412,14 +1611,16 @@ repository:
       settings = createSettings(stubConfig)
     })
 
-    it('returns empty array when no changedSubOrgs provided', async () => {
+    it('returns empty result when no changedSubOrgs provided', async () => {
       const result = await settings.getReposRemovedFromSubOrgTargeting([], 'prev-sha')
-      expect(result).toEqual([])
+      expect(result.repos).toEqual([])
+      expect(result.previousPluginSections).toEqual([])
     })
 
-    it('returns empty array when no baseRef provided', async () => {
+    it('returns empty result when no baseRef provided', async () => {
       const result = await settings.getReposRemovedFromSubOrgTargeting([{ path: '.github/suborgs/frontend.yml' }], null)
-      expect(result).toEqual([])
+      expect(result.repos).toEqual([])
+      expect(result.previousPluginSections).toEqual([])
     })
 
     it('identifies repos removed from suborgrepos targeting', async () => {
@@ -1429,7 +1630,7 @@ repository:
         teams: [{ name: 'core', permission: 'push' }]
       })).toString('base64')
 
-      stubContext.octokit.repos.getContent = jest.fn().mockImplementation((params) => {
+      stubContext.octokit.rest.repos.getContent = jest.fn().mockImplementation((params) => {
         if (params.ref === 'prev-sha') {
           return Promise.resolve({ data: { content: previousContent } })
         }
@@ -1441,6 +1642,12 @@ repository:
         return Promise.resolve({ data: { content: currentContent } })
       })
 
+      // Mock installation repos for glob resolution
+      stubContext.octokit.paginate = jest.fn().mockResolvedValue([
+        { name: 'repo-a', owner: { login: 'test' } },
+        { name: 'repo-b', owner: { login: 'test' } }
+      ])
+
       // Current subOrgConfigs only has repo-b (repo-a was removed from targeting)
       settings.subOrgConfigs = {
         'repo-b': { source: '.github/suborgs/frontend.yml' }
@@ -1451,8 +1658,43 @@ repository:
         'prev-sha'
       )
 
-      expect(result).toContain('repo-a')
-      expect(result).not.toContain('repo-b')
+      expect(result.repos).toContain('repo-a')
+      expect(result.repos).not.toContain('repo-b')
+      expect(result.previousPluginSections).toContain('teams')
+    })
+
+    it('identifies repos removed from suborgrepos glob targeting', async () => {
+      const previousContent = Buffer.from(yaml.dump({
+        suborgrepos: ['team-*'],
+        teams: [{ name: 'core', permission: 'push' }]
+      })).toString('base64')
+
+      stubContext.octokit.rest.repos.getContent = jest.fn().mockImplementation((params) => {
+        if (params.ref === 'prev-sha') {
+          return Promise.resolve({ data: { content: previousContent } })
+        }
+        return Promise.resolve({ data: { content: previousContent } })
+      })
+
+      stubContext.octokit.paginate = jest.fn().mockResolvedValue([
+        { owner: { login: 'test' }, name: 'team-a1' },
+        { owner: { login: 'test' }, name: 'team-b1' },
+        { owner: { login: 'test' }, name: 'other' }
+      ])
+
+      // Current targeting only matches team-a*
+      settings.subOrgConfigs = {
+        'team-a*': { source: '.github/suborgs/frontend.yml' }
+      }
+
+      const result = await settings.getReposRemovedFromSubOrgTargeting(
+        [{ path: '.github/suborgs/frontend.yml', name: 'frontend' }],
+        'prev-sha'
+      )
+
+      expect(result.repos).toContain('team-b1')
+      expect(result.repos).not.toContain('team-a1')
+      expect(result.repos).not.toContain('other')
     })
 
     it('identifies repos removed from suborgteams targeting', async () => {
@@ -1462,7 +1704,7 @@ repository:
         teams: [{ name: 'core', permission: 'push' }]
       })).toString('base64')
 
-      stubContext.octokit.repos.getContent = jest.fn().mockImplementation((params) => {
+      stubContext.octokit.rest.repos.getContent = jest.fn().mockImplementation((params) => {
         if (params.ref === 'prev-sha') {
           return Promise.resolve({ data: { content: previousContent } })
         }
@@ -1485,8 +1727,8 @@ repository:
         'prev-sha'
       )
 
-      expect(result).toContain('team-repo-2')
-      expect(result).not.toContain('team-repo-1')
+      expect(result.repos).toContain('team-repo-2')
+      expect(result.repos).not.toContain('team-repo-1')
     })
 
     it('identifies repos removed from suborgproperties targeting', async () => {
@@ -1496,7 +1738,7 @@ repository:
         teams: [{ name: 'core', permission: 'push' }]
       })).toString('base64')
 
-      stubContext.octokit.repos.getContent = jest.fn().mockImplementation((params) => {
+      stubContext.octokit.rest.repos.getContent = jest.fn().mockImplementation((params) => {
         if (params.ref === 'prev-sha') {
           return Promise.resolve({ data: { content: previousContent } })
         }
@@ -1519,8 +1761,8 @@ repository:
         'prev-sha'
       )
 
-      expect(result).toContain('prop-repo-2')
-      expect(result).not.toContain('prop-repo-1')
+      expect(result.repos).toContain('prop-repo-2')
+      expect(result.repos).not.toContain('prop-repo-1')
     })
 
     it('deduplicates removed repos across multiple suborg files', async () => {
@@ -1528,9 +1770,15 @@ repository:
         suborgrepos: ['repo-a', 'repo-b']
       })).toString('base64')
 
-      stubContext.octokit.repos.getContent = jest.fn().mockResolvedValue({
+      stubContext.octokit.rest.repos.getContent = jest.fn().mockResolvedValue({
         data: { content: previousContent }
       })
+
+      // Mock installation repos for glob resolution
+      stubContext.octokit.paginate = jest.fn().mockResolvedValue([
+        { name: 'repo-a', owner: { login: 'test' } },
+        { name: 'repo-b', owner: { login: 'test' } }
+      ])
 
       // Neither repo matches current targeting
       settings.subOrgConfigs = {}
@@ -1544,12 +1792,12 @@ repository:
       )
 
       // Should be deduplicated
-      const repoACount = result.filter(r => r === 'repo-a').length
+      const repoACount = result.repos.filter(r => r === 'repo-a').length
       expect(repoACount).toBe(1)
     })
 
     it('handles 404 gracefully when previous file does not exist', async () => {
-      stubContext.octokit.repos.getContent = jest.fn().mockRejectedValue(
+      stubContext.octokit.rest.repos.getContent = jest.fn().mockRejectedValue(
         Object.assign(new Error('Not Found'), { status: 404 })
       )
 
@@ -1557,6 +1805,108 @@ repository:
 
       const result = await settings.getReposRemovedFromSubOrgTargeting(
         [{ path: '.github/suborgs/new-suborg.yml', name: 'new-suborg' }],
+        'prev-sha'
+      )
+
+      expect(result).toEqual({ repos: [], previousPluginSections: [] })
+    })
+  })
+
+  describe('_buildAppChangesFromDelta', () => {
+    let settings
+    const AppOctokitClient = require('../../../lib/appOctokitClient')
+    const RepoSelector = require('../../../lib/repoSelector')
+
+    beforeEach(() => {
+      stubConfig = { restrictedRepos: {} }
+      settings = createSettings(stubConfig)
+      // Map app slug -> installation id
+      jest.spyOn(AppOctokitClient.prototype, 'listOrgInstallations').mockResolvedValue([
+        { app_slug: 'my-app', id: 42 }
+      ])
+    })
+
+    afterEach(() => {
+      jest.restoreAllMocks()
+    })
+
+    it('skips an app when suborg targeting and app_installations are unchanged', async () => {
+      // Same targeting resolves to the same repos in both versions
+      jest.spyOn(RepoSelector.prototype, 'resolve').mockResolvedValue(new Set(['repo-a', 'repo-b']))
+
+      // Current suborg config: app present
+      settings.subOrgConfigs = {
+        frontend: {
+          suborgrepos: ['repo-a', 'repo-b'],
+          app_installations: [{ app_slug: 'my-app' }]
+        }
+      }
+      // Previous version (baseRef): identical app_installations
+      settings.loadYamlFromRef = jest.fn().mockResolvedValue({
+        suborgrepos: ['repo-a', 'repo-b'],
+        app_installations: [{ app_slug: 'my-app' }]
+      })
+
+      const result = await settings._buildAppChangesFromDelta(
+        settings.github,
+        'my-enterprise',
+        [{ repo: 'frontend', path: '.github/suborgs/frontend.yml' }],
+        [],
+        'prev-sha'
+      )
+
+      // No churn: nothing to add or remove
+      expect(result).toEqual([])
+    })
+
+    it('emits only the targeting diff when suborg repos change', async () => {
+      // previous: repo-a, repo-b ; current: repo-b, repo-c
+      jest.spyOn(RepoSelector.prototype, 'resolve')
+        .mockResolvedValueOnce(new Set(['repo-b', 'repo-c'])) // current
+        .mockResolvedValueOnce(new Set(['repo-a', 'repo-b'])) // previous
+
+      settings.subOrgConfigs = {
+        frontend: {
+          suborgrepos: ['repo-b', 'repo-c'],
+          app_installations: [{ app_slug: 'my-app' }]
+        }
+      }
+      settings.loadYamlFromRef = jest.fn().mockResolvedValue({
+        suborgrepos: ['repo-a', 'repo-b'],
+        app_installations: [{ app_slug: 'my-app' }]
+      })
+
+      const result = await settings._buildAppChangesFromDelta(
+        settings.github,
+        'my-enterprise',
+        [{ repo: 'frontend', path: '.github/suborgs/frontend.yml' }],
+        [],
+        'prev-sha'
+      )
+
+      expect(result).toHaveLength(1)
+      expect(result[0].app_slug).toBe('my-app')
+      expect(result[0].repository_selection.sort()).toEqual(['repo-c'])
+      expect(result[0].repository_unselection.sort()).toEqual(['repo-a'])
+    })
+
+    it('skips apps configured at the org level (org entry implies all repos)', async () => {
+      jest.spyOn(RepoSelector.prototype, 'resolve').mockResolvedValue(new Set(['repo-a']))
+
+      settings.config = {
+        ...settings.config,
+        app_installations: [{ app_slug: 'my-app' }]
+      }
+      settings.subOrgConfigs = {
+        frontend: { suborgrepos: ['repo-a'], app_installations: [{ app_slug: 'my-app' }] }
+      }
+      settings.loadYamlFromRef = jest.fn().mockResolvedValue({})
+
+      const result = await settings._buildAppChangesFromDelta(
+        settings.github,
+        'my-enterprise',
+        [{ repo: 'frontend', path: '.github/suborgs/frontend.yml' }],
+        [],
         'prev-sha'
       )
 

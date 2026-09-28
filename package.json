@@ -28,7 +28,7 @@
   "author": "Yadhav Jayaraman",
   "license": "ISC",
   "dependencies": {
-    "@apidevtools/json-schema-ref-parser": "^12.0.2",
+    "@apidevtools/json-schema-ref-parser": "^14.2.1",
     "@octokit/auth-app": "^8.0.2",
     "@probot/adapter-aws-lambda-serverless": "^4.0.3",
     "d3-drag": "^3.0.0",
@@ -37,35 +37,38 @@
     "deepmerge": "^4.3.1",
     "eta": "^3.5.0",
     "js-yaml": "^4.1.0",
-    "lodash": "^4.17.21",
-    "minimatch": "^10.0.3",
+    "lodash": "^4.18.1",
+    "minimatch": "^10.2.1",
     "next": "^15.5.2",
-    "node-cron": "^3.0.2",
+    "node-cron": "^4.2.1",
     "octokit": "^5.0.2",
-    "probot": "^13.4.4",
-    "proxy-from-env": "^1.1.0",
+    "probot": "^14.3.2",
+    "proxy-from-env": "^2.1.0",
     "swr": "^2.4.1",
     "undici": "^7.7.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.1.0",
     "@travi/any": "^3.1.2",
+    "ajv": "^8.17.1",
     "check-engine": "^1.10.1",
     "eslint": "^8.46.0",
     "eslint-config-standard": "^17.1.0",
     "eslint-plugin-import": "^2.31.0",
     "eslint-plugin-node": "^11.1.0",
     "eslint-plugin-promise": "^6.6.0",
+    "express": "^4.22.3",
     "http-status-codes": "^2.2.0",
-    "jest": "^29.5.0",
-    "jest-junit": "^16.0.0",
+    "jest": "^29.7.0",
+    "jest-junit": "^17.0.0",
     "jest-when": "^3.5.2",
-    "lockfile-lint": "^4.14.0",
+    "lockfile-lint": "^4.14.1",
     "nock": "^14.0.1",
     "nodemon": "^3.1.9",
     "npm-run-all": "^4.1.5",
-    "smee-client": "^4.3.1",
-    "standard": "^17.1.2"
+    "smee-client": "^5.0.0",
+    "standard": "^17.1.2",
+    "supertest": "^7.2.2"
   },
   "standard": {
     "env": [
@@ -73,10 +76,13 @@
     ]
   },
   "engines": {
-    "node": ">= 16.0.0"
+    "node": ">= 22.0.0"
   },
   "jest": {
     "testEnvironment": "node",
+    "setupFilesAfterEnv": [
+      "<rootDir>/test/setup.js"
+    ],
     "reporters": [
       "default",
       "jest-junit"

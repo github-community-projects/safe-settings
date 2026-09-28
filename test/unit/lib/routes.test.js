@@ -9,11 +9,13 @@ jest.mock('axios');
 jest.mock('../../../lib/installationCache', () => ({
   getInstallations: jest.fn(),
   getOrgLogins: jest.fn(() => ['jetest99', 'jefeish-training']),
-  getLastFetchedAt: jest.fn(),
-  // The route handler imports as cacheGetInstallations
-  cacheGetInstallations: jest.fn()
+  getLastFetchedAt: jest.fn()
 }));
-const { cacheGetInstallations } = require('../../../lib/installationCache');
+jest.mock('../../../lib/hubSyncHandler', () => ({
+  retrieveSettingsFromOrgs: jest.fn()
+}));
+const { getInstallations: cacheGetInstallations } = require('../../../lib/installationCache');
+const { retrieveSettingsFromOrgs } = require('../../../lib/hubSyncHandler');
 
 let app;
 let robot;
@@ -134,13 +136,15 @@ describe('POST /api/safe-settings/hub/import', () => {
     expect(res.body.error).toMatch(/Missing orgs/);
   });
   it('should process import with orgs', async () => {
-    axios.post.mockResolvedValueOnce({ data: { success: true } });
+    retrieveSettingsFromOrgs.mockResolvedValueOnce([{ org: 'org1', success: true }]);
     const res = await request(app).post('/api/safe-settings/hub/import').send({ orgs: ['org1'] });
-    expect([200, 201, 500]).toContain(res.statusCode);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.ok).toBe(true);
   });
   it('should handle API errors', async () => {
-    axios.post.mockRejectedValueOnce(new Error('API down'));
+    retrieveSettingsFromOrgs.mockRejectedValueOnce(new Error('API down'));
     const res = await request(app).post('/api/safe-settings/hub/import').send({ orgs: ['org1'] });
-    expect([500, 404]).toContain(res.statusCode);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ ok: false, error: 'API down', results: [] });
   });
 });

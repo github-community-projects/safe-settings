@@ -1,0 +1,398 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Safe-settings repo-level configuration",
+  "description": "Schema for .github/repos/{repo-name}.yml — repo-level safe-settings override configuration. Settings here are merged on top of org-level and suborg-level settings for the specific repository.",
+  "type": "object",
+  "properties": {
+    "repositories": {
+      "$ref": "#/$defs/RepositorySettings"
+    },
+    "labels": {
+      "$ref": "#/$defs/LabelSettings"
+    },
+    "collaborators": {
+      "description": "Collaborators: give specific users access to any repository.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/CollaboratorSettings"
+      }
+    },
+    "teams": {
+      "description": "Teams",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/TeamSettings"
+      }
+    },
+    "milestones": {
+      "description": "Milestones: define milestones for Issues and Pull Requests",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/MilestoneSettings"
+      }
+    },
+    "branches": {
+      "description": "Branch protection rules",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/BranchSettings"
+      }
+    },
+    "autolinks": {
+      "description": "Autolinks",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/AutolinkSettings"
+      }
+    },
+    "validator": {
+      "$ref": "#/$defs/ValidatorSettings"
+    },
+    "rulesets": {
+      "description": "Repository rulesets applied to this repository",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/RulesetSettings"
+      }
+    },
+    "environments": {
+      "description": "Deployment environments",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/EnvironmentsSettings"
+      }
+    },
+    "custom_properties": {
+      "description": "Custom properties",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/CustomPropertiesSettings"
+      }
+    },
+    "variables": {
+      "description": "Repository or org-level Actions variables",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/VariablesSettings"
+      }
+    }
+  },
+  "$defs": {
+    "RepositorySettings": {
+      "description": "Repository settings",
+      "allOf": [
+        {
+          "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}/patch/requestBody/content/application~1json/schema"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "auto_init": {
+              "description": "Create an initial commit with empty README. Keep this set to true in most cases since many of the policies below cannot be implemented on bare repos",
+              "type": "boolean"
+            },
+            "gitignore_template": {
+              "description": "Desired language or platform [.gitignore template](https://github.com/github/gitignore) to apply. Use the name of the template without the extension. For example, 'Haskell'.",
+              "type": "string"
+            },
+            "license_template": {
+              "description": "Choose an [open source license template](https://choosealicense.com/) that best suits your needs, and then use the [license keyword](https://help.github.com/articles/licensing-a-repository/#searching-github-by-license-type) as the `license_template` string. For example, 'mit' or 'mpl-2.0'.",
+              "type": "string"
+            },
+            "topics": {
+              "description": "A list of topics to set on the repository",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "security": {
+              "description": "Settings for Code security and analysis",
+              "type": "object",
+              "properties": {
+                "enableVulnerabilityAlerts": {
+                  "type": "boolean"
+                },
+                "enableAutomatedSecurityFixes": {
+                  "type": "boolean"
+                }
+              }
+            },
+            "force_create": {
+              "description": "If true, create the repository if it does not already exist.",
+              "type": "boolean"
+            },
+            "template": {
+              "description": "Name of a template repository to use when creating a new repository.",
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "LabelSettings": {
+      "description": "Labels: define labels for Issues and Pull Requests",
+      "type": "object",
+      "properties": {
+        "include": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "color": {
+                "description": "The hexadecimal color code for the label. If including a `#`, make sure to wrap it with quotes!",
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "oldname": {
+                "description": "Include the old name to rename an existing label",
+                "type": "string"
+              }
+            }
+          }
+        },
+        "exclude": {
+          "description": "Ignore any labels matching these regexes (don't delete them)",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "CollaboratorSettings": {
+      "description": "A collaborator entry giving a specific user access to a repository.",
+      "allOf": [
+        {
+          "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}~1collaborators~1{username}/put/requestBody/content/application~1json/schema"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "username": {
+              "type": "string"
+            },
+            "exclude": {
+              "description": "You can exclude a list of repos for this collaborator and all repos except these repos would have this collaborator",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "include": {
+              "description": "You can include a list of repos for this collaborator and only those repos would have this collaborator",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "TeamSettings": {
+      "description": "A team entry",
+      "allOf": [
+        {
+          "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.2026-03-10.json#/paths/~1orgs~1{org}~1teams~1{team_slug}~1repos~1{owner}~1{repo}/put/requestBody/content/application~1json/schema"
+        },
+        {
+          "type": "object",
+          "required": [
+            "name"
+          ],
+          "properties": {
+            "name": {
+              "description": "The name (or slug) of the team to grant access to the repo.",
+              "type": "string"
+            },
+            "privacy": {
+              "description": "The level of privacy the team should have when it is created by safe-settings. The options are `secret` (visible only to organization owners and members of the team) or `closed` (visible to all members of the organization).",
+              "type": "string",
+              "enum": [
+                "secret",
+                "closed"
+              ]
+            },
+            "external_group": {
+              "description": "The display name of an external IdP group to link to this team.",
+              "type": "string"
+            },
+            "exclude": {
+              "description": "Exclude this team from repos whose names match one of these glob patterns.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "include": {
+              "description": "Apply this team only to repos whose names match one of these glob patterns.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "MilestoneSettings": {
+      "description": "A milestone entry",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "state": {
+          "description": "The state of the milestone. Either `open` or `closed`",
+          "type": "string"
+        }
+      }
+    },
+    "BranchSettings": {
+      "description": "A branch protection rule entry",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "If the name of the branch value is specified as `default`, then the app will create a branch protection rule to apply against the default branch in the repo",
+          "type": "string"
+        },
+        "protection": {
+          "anyOf": [
+            {
+              "enum": [null, {}, [], false],
+              "description": "An empty value deletes the existing branch protection"
+            },
+            {
+              "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}~1branches~1{branch}~1protection/put/requestBody/content/application~1json/schema"
+            }
+          ]
+        }
+      }
+    },
+    "AutolinkSettings": {
+      "description": "An autolink reference entry",
+      "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}~1autolinks/post/requestBody/content/application~1json/schema"
+    },
+    "ValidatorSettings": {
+      "description": "Repository name validation",
+      "type": "object",
+      "properties": {
+        "pattern": {
+          "type": "string"
+        }
+      }
+    },
+    "RulesetSettings": {
+      "description": "A repository ruleset entry",
+      "allOf": [
+        {
+          "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}~1rulesets/post/requestBody/content/application~1json/schema"
+        },
+        {
+          "properties": {
+            "conditions": {
+              "not": {
+                "anyOf": [
+                  { "required": ["repository_name"] },
+                  { "required": ["repository_id"] },
+                  { "required": ["repository_property"] }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "EnvironmentsSettings": {
+      "description": "A deployment environment configuration entry",
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "description": "The name of the deployment environment",
+          "type": "string"
+        },
+        "wait_timer": {
+          "description": "The amount of time to delay a job after the job is initially triggered (in minutes)",
+          "type": "integer"
+        },
+        "reviewers": {
+          "description": "The people or teams that may review jobs that reference the environment",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "description": "The type of reviewer (`User` or `Team`)",
+                "type": "string"
+              },
+              "id": {
+                "description": "The id of the user or team who can review the deployment",
+                "type": "integer"
+              }
+            }
+          }
+        },
+        "deployment_branch_policy": {
+          "description": "The type of deployment branch policy for this environment",
+          "type": "object",
+          "properties": {
+            "protected_branches": {
+              "description": "Whether only protected branches can be deployed to this environment",
+              "type": "boolean"
+            },
+            "custom_branch_policies": {
+              "description": "Whether only branches that match the specified name patterns can deploy to this environment",
+              "type": "boolean"
+            }
+          }
+        },
+        "prevent_self_review": {
+          "description": "Whether or not a user who created the job is prevented from approving their own job",
+          "type": "boolean"
+        }
+      }
+    },
+    "CustomPropertiesSettings": {
+      "description": "A custom property entry",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      }
+    },
+    "VariablesSettings": {
+      "description": "An Actions variable entry",
+      "type": "object",
+      "required": ["name", "value"],
+      "properties": {
+        "name": {
+          "description": "The name of the variable",
+          "type": "string"
+        },
+        "value": {
+          "description": "The value of the variable",
+          "type": "string"
+        },
+        "visibility": {
+          "description": "The visibility of the variable. Can be `all`, `private`, or `selected`",
+          "type": "string",
+          "enum": ["all", "private", "selected"]
+        }
+      }
+    }
+  }
+}

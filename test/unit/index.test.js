@@ -1,3 +1,4 @@
+jest.mock('probot', () => ({ Probot: class Probot {} }))
 const { Probot } = require('probot')
 const plugin = require('../../index')
 jest.mock('../../lib/hubSyncHandler', () => ({ hubSyncHandler: jest.fn() }))

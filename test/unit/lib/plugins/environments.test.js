@@ -10,7 +10,7 @@ describe('Environments Plugin test suite', () => {
   const PrimaryEnvironmentNamesBeingTested = ['wait-timer_environment', 'wait-timer_2_environment', 'reviewers_environment', 'prevent-self-review_environment', 'deployment-branch-policy_environment', 'deployment-branch-policy-custom_environment', 'deployment-branch-policy-custom_environment_legacy', 'variables_environment', 'deployment-protection-rules_environment', 'new_environment', 'old_environment']
   const EnvironmentNamesForTheNewEnvironmentsTest = ['new-wait-timer', 'new-reviewers', 'new-prevent-self-review', 'new-deployment-branch-policy', 'new-deployment-branch-policy-custom', 'new-deployment-branch-policy-custom-legacy', 'new-variables', 'new-deployment-protection-rules']
   const AllEnvironmentNamesBeingTested = PrimaryEnvironmentNamesBeingTested.concat(EnvironmentNamesForTheNewEnvironmentsTest)
-  const log = { debug: jest.fn(), error: console.error }
+  const log = { debug: jest.fn(), info: jest.fn(), error: console.error }
   const errors = []
 
   function fillEnvironment (attrs) {
@@ -1400,16 +1400,16 @@ describe('nopifyRequest', () => {
   let plugin
   const org = 'bkeepers'
   const repo = 'test'
-  const environment_name = 'test-environment'
+  const environmentName = 'test-environment'
   const url = 'PUT /repos/:org/:repo/environments/:environment_name'
-  const options = { org, repo, environment_name, wait_timer: 1 }
+  const options = { org, repo, environment_name: environmentName, wait_timer: 1 }
   const description = 'Update environment wait timer'
 
   beforeEach(() => {
     github = {
       request: jest.fn(() => Promise.resolve(true))
     }
-    plugin = new Environments(undefined, github, { owner: org, repo }, [], { debug: jest.fn(), error: console.error }, [])
+    plugin = new Environments(undefined, github, { owner: org, repo }, [], { debug: jest.fn(), info: jest.fn(), error: console.error }, [])
   })
 
   it('should make a request when nop is false', async () => {

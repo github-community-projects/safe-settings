@@ -1,7 +1,7 @@
 # This settings file can be used to create org-level settings
 
 # This is the settings that need to be applied to all repositories in the org
-# See https://docs.github.com/en/rest/repos/repos?apiVersion=2022-11-28#create-an-organization-repository for all available settings for a repository
+# See https://docs.github.com/en/rest/repos/repos?apiVersion=2026-03-10#create-an-organization-repository for all available settings for a repository
 repository:
   # A short description of the repository that will show up on GitHub
   description: description of the repo
@@ -123,7 +123,7 @@ milestones:
     state: open
 
 # Collaborators: give specific users access to any repository.
-# See https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2022-11-28#add-a-repository-collaborator for available options
+# See https://docs.github.com/en/rest/collaborators/collaborators?apiVersion=2026-03-10#add-a-repository-collaborator for available options
 collaborators:
   - username: regpaco
     # The permission to grant the collaborator. Can be one of:
@@ -144,7 +144,7 @@ collaborators:
       - another-repo
 
 # Teams
-# See https://docs.github.com/en/rest/teams/teams?apiVersion=2022-11-28#create-a-team for available options
+# See https://docs.github.com/en/rest/teams/teams?apiVersion=2026-03-10#create-a-team for available options
 teams:
   - name: core
     # The permission to grant the team. Can be one of:
@@ -161,9 +161,19 @@ teams:
   - name: globalteam
     permission: push
     visibility: closed
+  - name: docs-team
+    permission: pull
+    # You can include a list of repos for this team and only those repos would have this team
+    include:
+      - actions-demo
+  - name: ops-team
+    permission: push
+    # You can exclude a list of repos for this team and all repos except these repos would have this team
+    exclude:
+      - actions-demo
 
 # Branch protection rules
-# See https://docs.github.com/en/rest/branches/branch-protection?apiVersion=2022-11-28#update-branch-protection for available options
+# See https://docs.github.com/en/rest/branches/branch-protection?apiVersion=2026-03-10#update-branch-protection for available options
 branches:
   # If the name of the branch value is specified as `default`, then the app will create a branch protection rule to apply against the default branch in the repo
   - name: default
@@ -202,7 +212,7 @@ branches:
         teams: []
 
 # Custom properties
-# See https://docs.github.com/en/rest/repos/custom-properties?apiVersion=2022-11-28
+# See https://docs.github.com/en/rest/repos/custom-properties?apiVersion=2026-03-10
 custom_properties:
   - name: test
     value: test
@@ -221,7 +231,7 @@ validator:
   pattern: "[a-zA-Z0-9_-]+"
 
 # Rulesets
-# See https://docs.github.com/en/rest/orgs/rules?apiVersion=2022-11-28#create-an-organization-repository-rulesetfor available options
+# See https://docs.github.com/en/rest/orgs/rules?apiVersion=2026-03-10#create-an-organization-repository-rulesetfor available options
 rulesets:
   - name: Template
     # The target of the ruleset. Can be one of:

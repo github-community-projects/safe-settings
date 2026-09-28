@@ -8,7 +8,7 @@ describe('Variables', () => {
   const repo = 'test'
 
   function configure (nop = false, entries = [{ name: 'test', value: 'test' }]) {
-    const log = { debug: jest.fn(), error: console.error }
+    const log = { debug: jest.fn(), info: jest.fn(), error: console.error }
     const errors = []
     return new Variables(nop, github, { owner: org, repo }, entries, log, errors)
   }

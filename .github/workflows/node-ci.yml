@@ -11,19 +11,19 @@ concurrency:
 
 jobs:
   test:
-    if: ${{ github.actor != 'dependabot'}}
+    if: ${{ github.actor != 'dependabot[bot]'}}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Setup node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
-      - run: npm install
+      - run: npm ci
       - run: npm run test:unit:ci
     strategy:
       matrix:
         node-version:
-          - 18
-          - 20
+          - 22
+          - 24

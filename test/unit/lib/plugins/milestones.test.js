@@ -10,15 +10,17 @@ describe.skip('Milestones', () => {
   beforeEach(() => {
     github = {
       paginate: jest.fn().mockImplementation(() => Promise.resolve()),
-      issues: {
-        listMilestonesForRepo: {
-          endpoint: {
-            merge: jest.fn().mockImplementation(() => {})
-          }
-        },
-        createMilestone: jest.fn().mockImplementation(() => Promise.resolve()),
-        deleteMilestone: jest.fn().mockImplementation(() => Promise.resolve()),
-        updateMilestone: jest.fn().mockImplementation(() => Promise.resolve())
+      rest: {
+        issues: {
+          listMilestones: {
+            endpoint: {
+              merge: jest.fn().mockImplementation(() => {})
+            }
+          },
+          createMilestone: jest.fn().mockImplementation(() => Promise.resolve()),
+          deleteMilestone: jest.fn().mockImplementation(() => Promise.resolve()),
+          updateMilestone: jest.fn().mockImplementation(() => Promise.resolve())
+        }
       }
     }
   })
@@ -41,19 +43,19 @@ describe.skip('Milestones', () => {
 
       await plugin.sync()
 
-      expect(github.issues.deleteMilestone).toHaveBeenCalledWith({
+      expect(github.rest.issues.deleteMilestone).toHaveBeenCalledWith({
         owner: 'bkeepers',
         repo: 'test',
         milestone_number: 1
       })
 
-      expect(github.issues.createMilestone).toHaveBeenCalledWith({
+      expect(github.rest.issues.createMilestone).toHaveBeenCalledWith({
         owner: 'bkeepers',
         repo: 'test',
         title: 'added'
       })
 
-      expect(github.issues.updateMilestone).toHaveBeenCalledWith({
+      expect(github.rest.issues.updateMilestone).toHaveBeenCalledWith({
         owner: 'bkeepers',
         repo: 'test',
         title: 'new-description',
@@ -61,7 +63,7 @@ describe.skip('Milestones', () => {
         milestone_number: 2
       })
 
-      expect(github.issues.updateMilestone).toHaveBeenCalledWith({
+      expect(github.rest.issues.updateMilestone).toHaveBeenCalledWith({
         owner: 'bkeepers',
         repo: 'test',
         title: 'new-state',
@@ -69,9 +71,9 @@ describe.skip('Milestones', () => {
         milestone_number: 4
       })
 
-      expect(github.issues.deleteMilestone).toHaveBeenCalledTimes(1)
-      expect(github.issues.updateMilestone).toHaveBeenCalledTimes(2)
-      expect(github.issues.createMilestone).toHaveBeenCalledTimes(1)
+      expect(github.rest.issues.deleteMilestone).toHaveBeenCalledTimes(1)
+      expect(github.rest.issues.updateMilestone).toHaveBeenCalledTimes(2)
+      expect(github.rest.issues.createMilestone).toHaveBeenCalledTimes(1)
     })
   })
 })

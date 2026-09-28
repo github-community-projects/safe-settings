@@ -2027,4 +2027,47 @@ branches:
     expect(same.additions).toEqual({})
     expect(same.modifications).toEqual({})
   })
+
+  // Regression test for: TypeError: Cannot assign to read only property '0' of
+  // object '[object String]'. This was thrown by compareDeepIfVisited when a
+  // team entry had BOTH a changed primitive field (e.g. `permission`, which
+  // becomes a modification) AND a field the target lacks entirely (e.g.
+  // `external_group`, which becomes an addition). addIdentifyingAttribute adds
+  // the `name` identifying value as a plain string to both the addition and
+  // the modification containers, and the old merge logic then tried to
+  // Object.assign(modificationNameString, additionNameString) -- boxing a
+  // primitive string as the assignment target throws because string indices
+  // are read-only.
+  it('CompareDeep does not throw when a team has both a changed field and a new external_group field', () => {
+    const target = [
+      { id: 1, name: 'Azure-Security-GHEC-Runners-Developers', slug: 'azure-security-ghec-runners-developers', permission: 'push', privacy: 'closed' }
+    ]
+    const source = [
+      { name: 'Azure-Security-GHEC-Runners-Developers', permission: 'admin', external_group: 'Azure-Security-GHEC-Runners-Developers', privacy: 'closed' }
+    ]
+
+    const ignorableFields = ['id', 'node_id', 'url']
+    const mockReturnGitHubContext = jest.fn().mockReturnValue({
+      request: () => {}
+    })
+    const mergeDeep = new MergeDeep(
+      log,
+      mockReturnGitHubContext,
+      ignorableFields
+    )
+
+    let merged
+    expect(() => {
+      merged = mergeDeep.compareDeep(target, source)
+    }).not.toThrow()
+
+    expect(merged.hasChanges).toBe(true)
+    expect(merged.modifications).toEqual([
+      {
+        permission: 'admin',
+        name: 'Azure-Security-GHEC-Runners-Developers',
+        external_group: 'Azure-Security-GHEC-Runners-Developers'
+      }
+    ])
+  })
 })

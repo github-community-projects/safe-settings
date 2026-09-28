@@ -88,6 +88,9 @@ This will start the container in the background and detached.
   - `docker exec -it safe-settings /bin/sh`
 - You will now be inside the running **Docker** container and can perform any troubleshooting needed
 
+### Troubleshooting Docker Build and Runtime Issues
+For detailed guidance on debugging Docker image builds, runtime failures, and comparing local vs. GHCR images, see [docker-debugging.md](docker-debugging.md).
+
 ## Deploy the app to AWS Lambda
 
 ### Production-Ready Template 
@@ -295,6 +298,7 @@ Every deployment will need an [App](https://developer.github.com/apps/).
 #### Organization Permissions
 
 - Administration: **Read & Write**
+- Custom organization roles: **Read-only**
 - Custom properties: **Admin**
 - Members: **Read & Write**
 

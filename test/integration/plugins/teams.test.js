@@ -24,6 +24,8 @@ describe('teams plugin', function () {
     const probotTeamId = any.integer()
     const greenkeeperKeeperTeamId = any.integer()
     const formationTeamId = any.integer()
+    const securityManagerRoleId = any.integer()
+    const securityManagerTeamId = any.integer()
     githubScope
       .get(`/repos/${repository.owner.name}/${repository.name}/contents/${settings.FILE_PATH}`)
       .reply(OK, { content: encodedConfig, name: 'settings.yml', type: 'file' })
@@ -33,9 +35,20 @@ describe('teams plugin', function () {
         OK,
         [
           { slug: 'greenkeeper-keeper', id: greenkeeperKeeperTeamId, permission: 'pull' },
-          { slug: 'form8ion', id: formationTeamId, permission: 'push' }
+          { slug: 'form8ion', id: formationTeamId, permission: 'push' },
+          { slug: 'security-managers', id: securityManagerTeamId, permission: 'push' }
         ]
       )
+    githubScope
+      .get(`/orgs/${repository.owner.name}/organization-roles`)
+      .reply(OK, {
+        roles: [{ id: securityManagerRoleId, slug: 'security_manager', name: 'Security Manager' }]
+      })
+    githubScope
+      .get(`/orgs/${repository.owner.name}/organization-roles/${securityManagerRoleId}/teams`)
+      .reply(OK, {
+        teams: [{ id: securityManagerTeamId, slug: 'security-managers', name: 'Security Managers' }]
+      })
     githubScope
       .get(`/orgs/${repository.owner.name}/teams/probot`)
       .reply(OK, { id: probotTeamId })

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 const $RefParser = require('@apidevtools/json-schema-ref-parser')
-const fs = require('node:fs/promises');
+const fs = require('node:fs/promises')
+const path = require('node:path')
 
 // Safe-settings lets users reference ruleset bypass actors and required
 // reviewers by name instead of numeric id. GitHub's published schema only
@@ -42,15 +43,58 @@ const augmentRulesetAliases = (node) => {
   for (const value of Object.values(node)) {
     if (value && typeof value === 'object') augmentRulesetAliases(value)
   }
-};
+}
 
-(async () => {
-  const schema = await fs.readFile('schema/settings.json', 'utf-8').then(JSON.parse)
+const schemas = [
+  { src: 'schema/settings.json', dest: 'schema/dereferenced/settings.json' },
+  { src: 'schema/suborgs.json', dest: 'schema/dereferenced/suborgs.json' },
+  { src: 'schema/repos.json', dest: 'schema/dereferenced/repos.json' }
+]
 
-  await $RefParser.dereference(schema)
-
-  augmentRulesetAliases(schema)
-
+;(async () => {
   await fs.mkdir('schema/dereferenced', { recursive: true })
-  await fs.writeFile('schema/dereferenced/settings.json', JSON.stringify(schema, null, 2))
+
+  // Find the GitHub API spec URL from the schema files.
+  // The URL in the schema files is the single source of truth for which version is used.
+  const specUrlPattern = /(https:\/\/raw\.githubusercontent\.com\/github\/rest-api-description[^#"]+api\.github\.com[^#"]*\.json)/
+  let specUrl
+  for (const { src } of schemas) {
+    const match = (await fs.readFile(src, 'utf8')).match(specUrlPattern)
+    if (match) { specUrl = match[1]; break }
+  }
+
+  if (!specUrl) {
+    console.error('Could not find GitHub API spec URL in schema files.')
+    process.exit(1)
+  }
+
+  // Pre-dereference the spec so all internal $refs (e.g. #/components/schemas/...)
+  // are resolved before it is used as an external reference target.
+  console.log(`Fetching ${specUrl} ...`)
+  const resolvedSpec = await $RefParser.dereference(specUrl)
+
+  const githubApiResolver = {
+    order: 1,
+    canRead: file => file.url === specUrl,
+    read: () => resolvedSpec
+  }
+
+  let hasErrors = false
+  for (const { src, dest } of schemas) {
+    try {
+      const dereferenced = await $RefParser.dereference(path.resolve(src), {
+        resolve: { githubApi: githubApiResolver }
+      })
+      // Inject name-based aliases (bypass_actors[].name, reviewer.slug) that
+      // safe-settings supports but the published GitHub schema does not.
+      augmentRulesetAliases(dereferenced)
+      await fs.writeFile(dest, JSON.stringify(dereferenced, null, 2))
+      console.log(`Dereferenced ${src} → ${dest}`)
+    } catch (err) {
+      console.error(`Error dereferencing ${src}: ${err.message}`)
+      hasErrors = true
+    }
+  }
+
+  if (hasErrors) process.exit(1)
 })().catch(console.error)

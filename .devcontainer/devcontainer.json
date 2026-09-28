@@ -4,10 +4,10 @@
 	"name": "Node.js",
 	"build": {
 		"dockerfile": "Dockerfile",
-		// Update 'VARIANT' to pick a Node version: 16, 14, 12.
-		// Append -bullseye or -buster to pin to an OS version.
-		// Use -bullseye variants on local arm64/Apple Silicon.
-		"args": { "VARIANT": "20-bookworm" }
+		// Update 'VARIANT' to pick a Node version, e.g. 22, 20, 18.
+		// Append -bookworm or -bullseye to pin to an OS version.
+		// Use -bookworm variants on local arm64/Apple Silicon.
+		"args": { "VARIANT": "22-bookworm" }
 	},
 
 	"settings": {},

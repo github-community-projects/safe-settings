@@ -10,9 +10,11 @@ describe('Archive Plugin', () => {
 
   beforeEach(() => {
     github = {
-      repos: {
-        get: jest.fn(),
-        update: jest.fn().mockReturnValue({ data: {} })
+      rest: {
+        repos: {
+          get: jest.fn(),
+          update: jest.fn().mockReturnValue({ data: {} })
+        }
       }
     }
     repo = { owner: 'test-owner', repo: 'test-repo' }
@@ -23,19 +25,19 @@ describe('Archive Plugin', () => {
   describe('getRepo', () => {
     it('returns repository data when found', async () => {
       const mockData = { archived: false }
-      github.repos.get.mockResolvedValue({ data: mockData })
+      github.rest.repos.get.mockResolvedValue({ data: mockData })
       archive = new Archive(false, github, repo, settings, log)
 
       const result = await archive.getRepo()
       expect(result).toEqual(mockData)
-      expect(github.repos.get).toHaveBeenCalledWith({
+      expect(github.rest.repos.get).toHaveBeenCalledWith({
         owner: repo.owner,
         repo: repo.repo
       })
     })
 
     it('returns null when repo not found and no archive state defined', async () => {
-      github.repos.get.mockRejectedValue({ status: 404 })
+      github.rest.repos.get.mockRejectedValue({ status: 404 })
       archive = new Archive(false, github, repo, settings, log)
 
       const result = await archive.getRepo()
@@ -44,7 +46,7 @@ describe('Archive Plugin', () => {
 
     it('throws error for non-404 errors', async () => {
       const error = { status: 500 }
-      github.repos.get.mockRejectedValue(error)
+      github.rest.repos.get.mockRejectedValue(error)
       archive = new Archive(false, github, repo, settings, log)
 
       await expect(archive.getRepo()).rejects.toEqual(error)
@@ -55,7 +57,7 @@ describe('Archive Plugin', () => {
     it('returns NopCommand when nop is true', async () => {
       archive = new Archive(true, github, repo, settings, log)
       const mockEndpoint = { method: 'PATCH', url: '/repos/{owner}/{repo}' }
-      github.repos.update.endpoint = jest.fn().mockReturnValue(mockEndpoint)
+      github.rest.repos.update.endpoint = jest.fn().mockReturnValue(mockEndpoint)
 
       const result = await archive.updateRepoArchiveStatus(true)
       expect(result).toBeInstanceOf(NopCommand)
@@ -65,7 +67,7 @@ describe('Archive Plugin', () => {
       archive = new Archive(false, github, repo, settings, log)
 
       await archive.updateRepoArchiveStatus(true)
-      expect(github.repos.update).toHaveBeenCalledWith({
+      expect(github.rest.repos.update).toHaveBeenCalledWith({
         owner: repo.owner,
         repo: repo.repo,
         archived: true
@@ -91,13 +93,63 @@ describe('Archive Plugin', () => {
     })
   })
 
+  describe('getState', () => {
+    it('getState when repo is already archived and desired state is not set returns isArchived true shouldArchive false shouldUnarchive false', async () => {
+      // Arrange
+      github.rest.repos.get.mockResolvedValue({ data: { archived: true } })
+      archive = new Archive(false, github, repo, {}, log)
+
+      // Act
+      const result = await archive.getState()
+
+      // Assert
+      expect(result).toEqual({
+        isArchived: true,
+        shouldArchive: false,
+        shouldUnarchive: false
+      })
+    })
+
+    it('getState when repo is not archived and desired state is not set returns isArchived false shouldArchive false shouldUnarchive false', async () => {
+      // Arrange
+      github.rest.repos.get.mockResolvedValue({ data: { archived: false } })
+      archive = new Archive(false, github, repo, {}, log)
+
+      // Act
+      const result = await archive.getState()
+
+      // Assert
+      expect(result).toEqual({
+        isArchived: false,
+        shouldArchive: false,
+        shouldUnarchive: false
+      })
+    })
+
+    it('getState when repo is archived and desired state is false returns isArchived true shouldArchive false shouldUnarchive true', async () => {
+      // Arrange
+      github.rest.repos.get.mockResolvedValue({ data: { archived: true } })
+      archive = new Archive(false, github, repo, { archived: false }, log)
+
+      // Act
+      const result = await archive.getState()
+
+      // Assert
+      expect(result).toEqual({
+        isArchived: true,
+        shouldArchive: false,
+        shouldUnarchive: true
+      })
+    })
+  })
+
   describe('sync', () => {
     beforeEach(() => {
       archive = new Archive(false, github, repo, settings, log)
     })
 
     it('returns empty results when no archive changes needed', async () => {
-      github.repos.get.mockResolvedValue({
+      github.rest.repos.get.mockResolvedValue({
         data: { archived: false }
       })
       settings.archived = false
@@ -108,14 +160,14 @@ describe('Archive Plugin', () => {
     })
 
     it('archives repo when shouldArchive is true', async () => {
-      github.repos.get.mockResolvedValue({
+      github.rest.repos.get.mockResolvedValue({
         data: { archived: false }
       })
       settings.archived = true
 
       const results = await archive.sync()
       expect(results).toHaveLength(1)
-      expect(github.repos.update).toHaveBeenCalledWith({
+      expect(github.rest.repos.update).toHaveBeenCalledWith({
         owner: repo.owner,
         repo: repo.repo,
         archived: true

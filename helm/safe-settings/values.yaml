@@ -2,7 +2,7 @@
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
-replicaCount: 2
+replicaCount: 1
 
 image:
   repository: ghcr.io/github/safe-settings
@@ -45,6 +45,26 @@ envFrom: []
 #     name: app-env
 
 env: []
+# - name: CRON
+#   value: '*/5 * * * *'
+# - name: APP_ID
+#   valueFrom:
+#     secretKeyRef:
+#       name: github_app_secret
+#       key: app_id
+#       optional: false
+# - name: PRIVATE_KEY
+#   valueFrom:
+#     secretKeyRef:
+#       name: github_app_secret
+#       key: private_key
+#       optional: false
+# - name: WEBHOOK_SECRET
+#   valueFrom:
+#     secretKeyRef:
+#       name: github_app_secret
+#       key: webhook_secret
+#       optional: false
 
 service:
   type: ClusterIP
@@ -83,7 +103,7 @@ resources:
 
 autoscaling:
   enabled: false
-  minReplicas: 2
+  minReplicas: 1
   maxReplicas: 10
   targetCPUUtilizationPercentage: 80
   # targetMemoryUtilizationPercentage: 80
@@ -98,36 +118,38 @@ tolerations: []
 
 affinity: {}
 
+priorityClassName: ""
+
 deploymentConfig:
   restrictedRepos:
     # You can exclude certain repos from safe-settings processing
     #  If no file is specified, then the following repositories - 'admin', '.github', 'safe-settings' are exempted by default
     exclude: ["^admin$", '^\.github$', "^safe-settings$", ".*-test"]
     # Alternatively you can only include certain repos
-    include: ["^test$"]
-  configvalidators:
-    - plugin: collaborators
-      error: |
-        `Admin cannot be assigned to collaborators`
-      script: |
-        console.log(`baseConfig ${JSON.stringify(baseconfig)}`)
-        return baseconfig.permission != 'admin'
-  overridevalidators:
-    - plugin: branches
-      error: |
-        `Branch protection required_approving_review_count cannot be overidden to a lower value`
-      script: |
-        console.log(`baseConfig ${JSON.stringify(baseconfig)}`)
-        console.log(`overrideConfig ${JSON.stringify(overrideconfig)}`)
-        if (baseconfig.protection.required_pull_request_reviews.required_approving_review_count && overrideconfig.protection.required_pull_request_reviews.required_approving_review_count ) {
-          return overrideconfig.protection.required_pull_request_reviews.required_approving_review_count >= baseconfig.protection.required_pull_request_reviews.required_approving_review_count
-        }
-        return true
-    - plugin: labels
-      error: |
-        Some error
-      script: |
-        return true
+    include: null # ["^test$"]
+  configvalidators: []
+    # - plugin: collaborators
+    #   error: |
+    #     `Admin cannot be assigned to collaborators`
+    #   script: |
+    #     console.log(`baseConfig ${JSON.stringify(baseconfig)}`)
+    #     return baseconfig.permission != 'admin'
+  overridevalidators: []
+    # - plugin: branches
+    #   error: |
+    #     `Branch protection required_approving_review_count cannot be overridden to a lower value`
+    #   script: |
+    #     console.log(`baseConfig ${JSON.stringify(baseconfig)}`)
+    #     console.log(`overrideConfig ${JSON.stringify(overrideconfig)}`)
+    #     if (baseconfig.protection.required_pull_request_reviews.required_approving_review_count && overrideconfig.protection.required_pull_request_reviews.required_approving_review_count ) {
+    #       return overrideconfig.protection.required_pull_request_reviews.required_approving_review_count >= baseconfig.protection.required_pull_request_reviews.required_approving_review_count
+    #     }
+    #     return true
+    # - plugin: labels
+    #   error: |
+    #     Some error
+    #   script: |
+    #     return true
 
 # -- Add dynamic manifests via values. Example:
 # extraObjects:

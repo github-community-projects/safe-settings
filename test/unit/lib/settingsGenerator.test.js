@@ -117,19 +117,21 @@ describe('intersectConfigs', () => {
 describe('SettingsGenerator extractors', () => {
   it('repository() selects only configurable fields', async () => {
     const github = {
-      repos: {
-        get: jest.fn().mockResolvedValue({
-          data: {
-            id: 1,
-            node_id: 'x',
-            name: 'test',
-            description: 'desc',
-            has_issues: true,
-            stargazers_count: 99,
-            topics: ['a', 'b'],
-            default_branch: 'main'
-          }
-        })
+      rest: {
+        repos: {
+          get: jest.fn().mockResolvedValue({
+            data: {
+              id: 1,
+              node_id: 'x',
+              name: 'test',
+              description: 'desc',
+              has_issues: true,
+              stargazers_count: 99,
+              topics: ['a', 'b'],
+              default_branch: 'main'
+            }
+          })
+        }
       }
     }
     const generator = makeGenerator(github)

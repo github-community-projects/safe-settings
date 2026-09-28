@@ -16,7 +16,28 @@ const repository = {
 }
 
 function loadInstance () {
-  const probot = createProbot({ id: 1, cert: 'test', githubToken: 'test' })
+  // Probot 13's `createProbot` only reads `overrides`/`defaults`/`env`, so the
+  // old positional `{ id, cert, githubToken }` args were silently dropped,
+  // leaving no credentials and making `@octokit/auth-app` throw
+  // "appId option is required". Provide dummy credentials via `overrides`.
+  // Using a `githubToken` selects Octokit's token auth strategy, which avoids
+  // the app-auth JWT/installation-token calls that the nock scopes don't mock.
+  //
+  // The app also runs `info()` on load, which lists app installations. Stub
+  // that startup call with an empty list so it resolves cleanly under
+  // `nock.disableNetConnect()` without interfering with the per-test scopes.
+  nock('https://api.github.com')
+    .persist()
+    .get('/app/installations')
+    .query(true)
+    .reply(200, [])
+
+  const probot = createProbot({
+    overrides: {
+      appId: 1,
+      githubToken: 'test'
+    }
+  })
   probot.load(settingsBot)
 
   return probot

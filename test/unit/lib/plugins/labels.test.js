@@ -12,21 +12,23 @@ describe('Labels', () => {
   beforeEach(() => {
     github = {
       paginate: jest.fn().mockImplementation(() => Promise.resolve()),
-      repos: {
-        get: jest.fn().mockImplementation(() => Promise.resolve({}))
-      },
-      issues: {
-        listLabelsForRepo: {
-          endpoint: {
-            merge: jest.fn().mockImplementation(() => {})
-          }
+      rest: {
+        repos: {
+          get: jest.fn().mockImplementation(() => Promise.resolve({}))
         },
-        createLabel: jest.fn().mockImplementation(() => Promise.resolve()),
-        deleteLabel: jest.fn().mockImplementation(() => Promise.resolve()),
-        updateLabel: jest.fn().mockImplementation(() => Promise.resolve())
+        issues: {
+          listLabelsForRepo: {
+            endpoint: {
+              merge: jest.fn().mockImplementation(() => {})
+            }
+          },
+          createLabel: jest.fn().mockImplementation(() => Promise.resolve()),
+          deleteLabel: jest.fn().mockImplementation(() => Promise.resolve()),
+          updateLabel: jest.fn().mockImplementation(() => Promise.resolve())
+        }
       }
     }
-    log = { debug: jest.fn(), error: console.error }
+    log = { debug: jest.fn(), info: jest.fn(), error: console.error }
   })
 
   describe('sync', () => {
@@ -48,14 +50,16 @@ describe('Labels', () => {
       ])
 
       return plugin.sync().then(() => {
-        expect(github.issues.deleteLabel).toHaveBeenCalledWith({
+        expect(log.info).toHaveBeenCalledWith(expect.stringContaining('Applying Labels changes to bkeepers/test'))
+
+        expect(github.rest.issues.deleteLabel).toHaveBeenCalledWith({
           owner: 'bkeepers',
           repo: 'test',
           name: 'delete-me',
           headers: { accept: 'application/vnd.github.symmetra-preview+json' }
         })
 
-        expect(github.issues.createLabel).toHaveBeenCalledWith({
+        expect(github.rest.issues.createLabel).toHaveBeenCalledWith({
           owner: 'bkeepers',
           repo: 'test',
           name: 'added',
@@ -63,7 +67,7 @@ describe('Labels', () => {
           headers: { accept: 'application/vnd.github.symmetra-preview+json' }
         })
 
-        expect(github.issues.updateLabel).toHaveBeenCalledWith({
+        expect(github.rest.issues.updateLabel).toHaveBeenCalledWith({
           owner: 'bkeepers',
           repo: 'test',
           current_name: 'update-me',
@@ -73,7 +77,7 @@ describe('Labels', () => {
           headers: { accept: 'application/vnd.github.symmetra-preview+json' }
         })
 
-        expect(github.issues.updateLabel).toHaveBeenCalledWith({
+        expect(github.rest.issues.updateLabel).toHaveBeenCalledWith({
           owner: 'bkeepers',
           repo: 'test',
           current_name: 'new-color',
@@ -83,7 +87,7 @@ describe('Labels', () => {
           headers: { accept: 'application/vnd.github.symmetra-preview+json' }
         })
 
-        expect(github.issues.updateLabel).toHaveBeenCalledWith({
+        expect(github.rest.issues.updateLabel).toHaveBeenCalledWith({
           owner: 'bkeepers',
           repo: 'test',
           current_name: 'new-description',
@@ -93,9 +97,9 @@ describe('Labels', () => {
           headers: { accept: 'application/vnd.github.symmetra-preview+json' }
         })
 
-        expect(github.issues.deleteLabel).toHaveBeenCalledTimes(1)
-        expect(github.issues.updateLabel).toHaveBeenCalledTimes(3)
-        expect(github.issues.createLabel).toHaveBeenCalledTimes(1)
+        expect(github.rest.issues.deleteLabel).toHaveBeenCalledTimes(1)
+        expect(github.rest.issues.updateLabel).toHaveBeenCalledTimes(3)
+        expect(github.rest.issues.createLabel).toHaveBeenCalledTimes(1)
       })
     })
 
@@ -122,14 +126,14 @@ describe('Labels', () => {
       })
 
       return plugin.sync().then(() => {
-        expect(github.issues.deleteLabel).toHaveBeenCalledWith({
+        expect(github.rest.issues.deleteLabel).toHaveBeenCalledWith({
           owner: 'bkeepers',
           repo: 'test',
           name: 'delete-me',
           headers: { accept: 'application/vnd.github.symmetra-preview+json' }
         })
 
-        expect(github.issues.updateLabel).toHaveBeenCalledWith({
+        expect(github.rest.issues.updateLabel).toHaveBeenCalledWith({
           owner: 'bkeepers',
           repo: 'test',
           current_name: 'update-me',
@@ -139,9 +143,9 @@ describe('Labels', () => {
           headers: { accept: 'application/vnd.github.symmetra-preview+json' }
         })
 
-        expect(github.issues.deleteLabel).toHaveBeenCalledTimes(1)
-        expect(github.issues.updateLabel).toHaveBeenCalledTimes(1)
-        expect(github.issues.createLabel).toHaveBeenCalledTimes(1)
+        expect(github.rest.issues.deleteLabel).toHaveBeenCalledTimes(1)
+        expect(github.rest.issues.updateLabel).toHaveBeenCalledTimes(1)
+        expect(github.rest.issues.createLabel).toHaveBeenCalledTimes(1)
       })
     })
   })
