@@ -28,17 +28,11 @@ describe('Environments Plugin test suite', () => {
   beforeEach(() => {
     // arrange for all
     github = {
+      paginate: jest.fn().mockResolvedValue([]),
       request: jest.fn(() => Promise.resolve(true))
     }
 
     AllEnvironmentNamesBeingTested.forEach((environmentName) => {
-      when(github.request)
-        .calledWith('GET /repos/:org/:repo/environments/:environment_name/variables', { org, repo, environment_name: environmentName })
-        .mockResolvedValue({
-          data: {
-            variables: []
-          }
-        })
       when(github.request)
         .calledWith('GET /repos/:org/:repo/environments/:environment_name/deployment_protection_rules', { org, repo, environment_name: environmentName })
         .mockResolvedValue({
@@ -98,6 +92,18 @@ describe('Environments Plugin test suite', () => {
 
   // start individual tests
 
+  it.each([{}, { variables: [] }, { variables: [{ name: 'UPPER', value: 'value' }] }])('maps wrapped variable pages: %j', async data => {
+    github.paginate.mockImplementation(async (route, options, mapper) => mapper({ data }))
+    when(github.request)
+      .calledWith('GET /repos/:org/:repo/environments', { org, repo })
+      .mockResolvedValue({ data: { environments: [fillEnvironment({ name: 'Production' })] } })
+    when(github.request)
+      .calledWith('GET /repos/:org/:repo/environments/:environment_name/deployment_protection_rules', { org, repo, environment_name: 'Production' })
+      .mockResolvedValue({ data: { custom_deployment_protection_rules: [] } })
+    const plugin = new Environments(false, github, { owner: org, repo }, [], log, [])
+    expect((await plugin.find())[0].variables).toEqual((data.variables || []).map(({ name, value }) => ({ name: name.toLowerCase(), value })))
+  })
+
   // wait-timer
   describe('When the existing wait-timer is 0 and the config is set to 1', () => {
     it('detect divergence and set wait-timer to 1', async () => {
@@ -129,7 +135,7 @@ describe('Environments Plugin test suite', () => {
       await plugin.sync().then(() => {
         // assert - update to the wait timer was requested with value 1
         expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments', { org, repo })
-        expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/variables', { org, repo, environment_name: environmentName })
+        expect(github.paginate).toHaveBeenCalledWith('GET /repos/{owner}/{repo}/environments/{environment_name}/variables', { owner: org, repo, environment_name: environmentName, per_page: 100 }, expect.any(Function))
         expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/deployment_protection_rules', { org, repo, environment_name: environmentName })
         expect(github.request).toHaveBeenCalledWith('PUT /repos/:org/:repo/environments/:environment_name', expect.objectContaining({
           org,
@@ -190,7 +196,7 @@ describe('Environments Plugin test suite', () => {
       await plugin.sync().then(() => {
         // assert - update the reviewers
         expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments', { org, repo })
-        expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/variables', { org, repo, environment_name: environmentName })
+        expect(github.paginate).toHaveBeenCalledWith('GET /repos/{owner}/{repo}/environments/{environment_name}/variables', { owner: org, repo, environment_name: environmentName, per_page: 100 }, expect.any(Function))
         expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/deployment_protection_rules', { org, repo, environment_name: environmentName })
         expect(github.request).toHaveBeenCalledWith('PUT /repos/:org/:repo/environments/:environment_name', expect.objectContaining({
           org,
@@ -238,7 +244,7 @@ describe('Environments Plugin test suite', () => {
       await plugin.sync().then(() => {
         // assert - update the prevent self review boolean
         expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments', { org, repo })
-        expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/variables', { org, repo, environment_name: environmentName })
+        expect(github.paginate).toHaveBeenCalledWith('GET /repos/{owner}/{repo}/environments/{environment_name}/variables', { owner: org, repo, environment_name: environmentName, per_page: 100 }, expect.any(Function))
         expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/deployment_protection_rules', { org, repo, environment_name: environmentName })
         expect(github.request).toHaveBeenCalledWith('PUT /repos/:org/:repo/environments/:environment_name', expect.objectContaining({
           org,
@@ -284,7 +290,7 @@ describe('Environments Plugin test suite', () => {
       await plugin.sync().then(() => {
         // assert - update branch policy
         expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments', { org, repo })
-        expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/variables', { org, repo, environment_name: environmentName })
+        expect(github.paginate).toHaveBeenCalledWith('GET /repos/{owner}/{repo}/environments/{environment_name}/variables', { owner: org, repo, environment_name: environmentName, per_page: 100 }, expect.any(Function))
         expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/deployment_protection_rules', { org, repo, environment_name: environmentName })
         expect(github.request).toHaveBeenCalledWith('PUT /repos/:org/:repo/environments/:environment_name', expect.objectContaining({
           org,
@@ -342,7 +348,7 @@ describe('Environments Plugin test suite', () => {
       await plugin.sync().then(() => {
         // assert - update the custom branch policies
         expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments', { org, repo })
-        expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/variables', { org, repo, environment_name: environmentName })
+        expect(github.paginate).toHaveBeenCalledWith('GET /repos/{owner}/{repo}/environments/{environment_name}/variables', { owner: org, repo, environment_name: environmentName, per_page: 100 }, expect.any(Function))
         expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/deployment_protection_rules', { org, repo, environment_name: environmentName })
         expect(github.request).toHaveBeenCalledWith('PUT /repos/:org/:repo/environments/:environment_name', expect.objectContaining({
           org,
@@ -412,7 +418,7 @@ describe('Environments Plugin test suite', () => {
       await plugin.sync().then(() => {
         // assert - update the custom branch policies
         expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments', { org, repo })
-        expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/variables', { org, repo, environment_name: environmentName })
+        expect(github.paginate).toHaveBeenCalledWith('GET /repos/{owner}/{repo}/environments/{environment_name}/variables', { owner: org, repo, environment_name: environmentName, per_page: 100 }, expect.any(Function))
         expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/deployment_protection_rules', { org, repo, environment_name: environmentName })
         expect(github.request).toHaveBeenCalledWith('PUT /repos/:org/:repo/environments/:environment_name', expect.objectContaining({
           org,
@@ -477,7 +483,7 @@ describe('Environments Plugin test suite', () => {
       await plugin.sync().then(() => {
         // assert - update the variables
         expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments', { org, repo })
-        expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/variables', { org, repo, environment_name: environmentName })
+        expect(github.paginate).toHaveBeenCalledWith('GET /repos/{owner}/{repo}/environments/{environment_name}/variables', { owner: org, repo, environment_name: environmentName, per_page: 100 }, expect.any(Function))
         expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/deployment_protection_rules', { org, repo, environment_name: environmentName })
         expect(github.request).toHaveBeenCalledWith('POST /repos/:org/:repo/environments/:environment_name/variables', expect.objectContaining({
           org,
@@ -522,24 +528,13 @@ describe('Environments Plugin test suite', () => {
         })
 
       // model an existing environment with a variable that has a different value
-      when(github.request)
-        .calledWith('GET /repos/:org/:repo/environments/:environment_name/variables', { org, repo, environment_name: environmentName })
-        .mockResolvedValue({
-          data: {
-            variables: [
-              {
-                name: 'TEST',
-                value: 'test'
-              }
-            ]
-          }
-        })
+      github.paginate.mockResolvedValue([{ name: 'TEST', value: 'test' }])
 
       // act - run sync() in environments.js
       await plugin.sync().then(() => {
         // assert - update the variables
         expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments', { org, repo })
-        expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/variables', { org, repo, environment_name: environmentName })
+        expect(github.paginate).toHaveBeenCalledWith('GET /repos/{owner}/{repo}/environments/{environment_name}/variables', { owner: org, repo, environment_name: environmentName, per_page: 100 }, expect.any(Function))
         expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/deployment_protection_rules', { org, repo, environment_name: environmentName })
         expect(github.request).toHaveBeenCalledWith('PATCH /repos/:org/:repo/environments/:environment_name/variables/:variable_name', expect.objectContaining({
           org,
@@ -584,28 +579,13 @@ describe('Environments Plugin test suite', () => {
         })
 
       // model an existing environment with a variable that has a different value
-      when(github.request)
-        .calledWith('GET /repos/:org/:repo/environments/:environment_name/variables', { org, repo, environment_name: environmentName })
-        .mockResolvedValue({
-          data: {
-            variables: [
-              {
-                name: 'TEST',
-                value: 'test'
-              },
-              {
-                name: 'TEST2',
-                value: 'test2'
-              }
-            ]
-          }
-        })
+      github.paginate.mockResolvedValue([{ name: 'TEST', value: 'test' }, { name: 'TEST2', value: 'test2' }])
 
       // act - run sync() in environments.js
       await plugin.sync().then(() => {
         // assert - update the variables
         expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments', { org, repo })
-        expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/variables', { org, repo, environment_name: environmentName })
+        expect(github.paginate).toHaveBeenCalledWith('GET /repos/{owner}/{repo}/environments/{environment_name}/variables', { owner: org, repo, environment_name: environmentName, per_page: 100 }, expect.any(Function))
         expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/deployment_protection_rules', { org, repo, environment_name: environmentName })
         expect(github.request).toHaveBeenCalledWith('DELETE /repos/:org/:repo/environments/:environment_name/variables/:variable_name', expect.objectContaining({
           org,
@@ -652,7 +632,7 @@ describe('Environments Plugin test suite', () => {
       await plugin.sync().then(() => {
         // assert - update the deployment protection rules
         expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments', { org, repo })
-        expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/variables', { org, repo, environment_name: environmentName })
+        expect(github.paginate).toHaveBeenCalledWith('GET /repos/{owner}/{repo}/environments/{environment_name}/variables', { owner: org, repo, environment_name: environmentName, per_page: 100 }, expect.any(Function))
         expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/deployment_protection_rules', { org, repo, environment_name: environmentName })
         expect(github.request).toHaveBeenCalledWith('POST /repos/:org/:repo/environments/:environment_name/deployment_protection_rules', expect.objectContaining({
           org,
@@ -700,7 +680,7 @@ describe('Environments Plugin test suite', () => {
       await plugin.sync().then(() => {
         // assert - update to the wait timer was requested with value 2
         expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments', { org, repo })
-        expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/variables', { org, repo, environment_name: environmentName })
+        expect(github.paginate).toHaveBeenCalledWith('GET /repos/{owner}/{repo}/environments/{environment_name}/variables', { owner: org, repo, environment_name: environmentName, per_page: 100 }, expect.any(Function))
         expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/deployment_protection_rules', { org, repo, environment_name: environmentName })
         expect(github.request).not.toHaveBeenCalledWith('PUT /repos/:org/:repo/environments/:environment_name', expect.objectContaining({
           org,
@@ -739,7 +719,7 @@ describe('Environments Plugin test suite', () => {
       await plugin.sync().then(() => {
         // assert - the new environment was added
         expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments', { org, repo })
-        expect(github.request).not.toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/variables', { org, repo, environment_name: environmentName })
+        expect(github.paginate).not.toHaveBeenCalledWith('GET /repos/{owner}/{repo}/environments/{environment_name}/variables', { owner: org, repo, environment_name: environmentName, per_page: 100 }, expect.any(Function))
         expect(github.request).not.toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/deployment_protection_rules', { org, repo, environment_name: environmentName })
         expect(github.request).toHaveBeenCalledWith('PUT /repos/:org/:repo/environments/:environment_name', expect.objectContaining({
           org,
@@ -780,7 +760,7 @@ describe('Environments Plugin test suite', () => {
       await plugin.sync().then(() => {
         // assert - the new environment was added
         expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments', { org, repo })
-        expect(github.request).not.toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/variables', { org, repo, environment_name: environmentName })
+        expect(github.paginate).not.toHaveBeenCalledWith('GET /repos/{owner}/{repo}/environments/{environment_name}/variables', { owner: org, repo, environment_name: environmentName, per_page: 100 }, expect.any(Function))
         expect(github.request).not.toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/deployment_protection_rules', { org, repo, environment_name: environmentName })
         expect(github.request).toHaveBeenCalledWith('PUT /repos/:org/:repo/environments/:environment_name', expect.objectContaining({
           org,
@@ -790,7 +770,7 @@ describe('Environments Plugin test suite', () => {
 
         // assert - the old environment was deleted
         expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments', { org, repo })
-        expect(github.request).not.toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/variables', { org, repo, old_environment_name: oldEnvironmentName })
+        expect(github.paginate).toHaveBeenCalledWith('GET /repos/{owner}/{repo}/environments/{environment_name}/variables', { owner: org, repo, environment_name: oldEnvironmentName, per_page: 100 }, expect.any(Function))
         expect(github.request).not.toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/deployment_protection_rules', { org, repo, old_environment_name: oldEnvironmentName })
         expect(github.request).toHaveBeenCalledWith('DELETE /repos/:org/:repo/environments/:environment_name', expect.objectContaining({
           org,
@@ -928,7 +908,7 @@ describe('Environments Plugin test suite', () => {
         expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments', { org, repo });
 
         ['wait-timer_environment', 'reviewers_environment', 'prevent-self-review_environment', 'deployment-branch-policy_environment', 'deployment-branch-policy-custom_environment', 'deployment-branch-policy-custom_environment_legacy', 'variables_environment', 'deployment-protection-rules_environment'].forEach((environmentName) => {
-          expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/variables', { org, repo, environment_name: environmentName })
+          expect(github.paginate).toHaveBeenCalledWith('GET /repos/{owner}/{repo}/environments/{environment_name}/variables', { owner: org, repo, environment_name: environmentName, per_page: 100 }, expect.any(Function))
 
           expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/deployment_protection_rules', { org, repo, environment_name: environmentName })
         })
@@ -1253,7 +1233,7 @@ describe('Environments Plugin test suite', () => {
         expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments', { org, repo });
 
         ['wait-timer_environment', 'reviewers_environment', 'prevent-self-review_environment', 'deployment-branch-policy_environment', 'deployment-branch-policy-custom_environment', 'variables_environment', 'deployment-protection-rules_environment'].forEach((environmentName) => {
-          expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/variables', { org, repo, environment_name: environmentName })
+          expect(github.paginate).toHaveBeenCalledWith('GET /repos/{owner}/{repo}/environments/{environment_name}/variables', { owner: org, repo, environment_name: environmentName, per_page: 100 }, expect.any(Function))
 
           expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/deployment_protection_rules', { org, repo, environment_name: environmentName })
         })
@@ -1382,7 +1362,7 @@ describe('Environments Plugin test suite', () => {
 
         // assert - seven new environments were also added
         EnvironmentNamesForTheNewEnvironmentsTest.forEach(newEnvironmentName => {
-          expect(github.request).not.toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/variables', { org, repo, new_environment_name: newEnvironmentName })
+          expect(github.paginate).not.toHaveBeenCalledWith('GET /repos/{owner}/{repo}/environments/{environment_name}/variables', { owner: org, repo, environment_name: newEnvironmentName, per_page: 100 }, expect.any(Function))
           expect(github.request).not.toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/deployment_protection_rules', { org, repo, new_environment_name: newEnvironmentName })
           expect(github.request).toHaveBeenCalledWith('PUT /repos/:org/:repo/environments/:environment_name', expect.objectContaining({
             org,

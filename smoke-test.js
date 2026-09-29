@@ -2472,6 +2472,98 @@ async function phase14RegressionCoverage () {
   }
 }
 
+async function phase21VariablePagination () {
+  logPhase('Phase 21: Variable pagination - 101 repository variables and 100 environment variables')
+  const Variables = require('./lib/plugins/variables')
+  const Environments = require('./lib/plugins/environments')
+  const target = { owner: ORG, repo: 'test' }
+  const environmentName = 'smoke-pagination'
+  const variables = Array.from({ length: 101 }, (_, i) => ({
+    name: `SMOKE_PAGE_${String(i).padStart(3, '0')}`,
+    value: `value-${i}`
+  }))
+  // GitHub permits only 100 variables per environment. The transport tests
+  // also cover 101 environment variables; this phase stays within the live limit.
+  const environmentVariables = variables.slice(0, 100).map(v => ({ ...v, name: v.name.toLowerCase() }))
+  const errors = []
+  const pluginLog = { debug () {}, info: log, error: log }
+  const repositoryPlugin = nop => new Variables(nop, octokit, target, structuredClone(variables), pluginLog, errors)
+  const environmentPlugin = nop => new Environments(nop, octokit, target, [{ name: environmentName, variables: structuredClone(environmentVariables) }], pluginLog, errors)
+  const requireAssertion = (condition, message) => {
+    if (!assert(condition, `21: ${message}`)) throw new Error(`Phase 21: ${message}`)
+  }
+
+  requireAssertion((await repositoryPlugin(false).find()).length === 0, 'repository fixture starts empty after phase 13')
+  const { data: environments } = await octokit.request('GET /repos/{owner}/{repo}/environments', target)
+  requireAssertion(environments.environments.length === 0, 'no pre-existing environments are overwritten')
+  await octokit.request('PUT /repos/{owner}/{repo}/environments/{environment_name}', { ...target, environment_name: environmentName })
+  requireAssertion((await environmentPlugin(false).find())[0].variables.length === 0, 'empty environment variable page maps to an empty list')
+
+  log('Seeding pagination fixtures sequentially (one write per second)...')
+  for (const variable of variables) {
+    await octokit.request('POST /repos/{owner}/{repo}/actions/variables', { ...target, ...variable })
+    await sleep(1000)
+  }
+  for (const variable of environmentVariables) {
+    await octokit.request('POST /repos/{owner}/{repo}/environments/{environment_name}/variables', { ...target, environment_name: environmentName, ...variable })
+    await sleep(1000)
+  }
+
+  const writes = []
+  const variableReads = []
+  const environmentReads = []
+  const observe = async (request, options) => {
+    if (options.method !== 'GET') writes.push({ method: options.method, url: options.url })
+    const response = await request(options)
+    if (options.method === 'GET' && Array.isArray(response.data.variables)) {
+      const reads = options.url.includes('/actions/variables') ? variableReads : environmentReads
+      reads.push({
+        url: octokit.request.endpoint(options).url,
+        next: (response.headers.link || '').match(/<([^>]+)>;\s*rel="next"/)?.[1],
+        count: response.data.variables.length
+      })
+    }
+    return response
+  }
+  const followsPages = (pages, count) => pages.length > 0 &&
+    pages.reduce((sum, page) => sum + page.count, 0) === count &&
+    pages.every((page, index) =>
+      page.count > 0 && page.count <= 100 &&
+      new URL(page.url).searchParams.get('per_page') === '100' &&
+      page.next === pages[index + 1]?.url)
+  octokit.hook.wrap('request', observe)
+  try {
+    const found = await repositoryPlugin(false).find()
+    requireAssertion(JSON.stringify(found) === JSON.stringify(variables), 'all 101 repository names and values are returned in their original shape')
+    log(`Repository variable page evidence: ${JSON.stringify(variableReads)}`)
+    requireAssertion(variableReads.length > 1 && followsPages(variableReads, 101),
+      'repository listing follows every API next link with per_page=100, even when the server returns smaller pages')
+    const foundEnvironment = await environmentPlugin(false).find()
+    requireAssertion(JSON.stringify(foundEnvironment[0].variables) === JSON.stringify(environmentVariables), 'all 100 environment names and values are normalized correctly')
+    log(`Environment variable page evidence: ${JSON.stringify(environmentReads)}`)
+    requireAssertion(followsPages(environmentReads, 100), 'environment listing follows every API next link with per_page=100')
+
+    for (const nop of [true, false]) {
+      const repoResult = await repositoryPlugin(nop).sync()
+      const envResult = await environmentPlugin(nop).sync()
+      requireAssertion(!nop || ((repoResult === undefined || repoResult.length === 0) && envResult.length === 0), 'unchanged NOP returns no proposed variable changes')
+      requireAssertion(errors.length === 0 && writes.length === 0, `${nop ? 'NOP' : 'apply'} creates no duplicates and performs no updates`)
+    }
+
+    variables[100].value = 'updated-page-two'
+    environmentVariables[99].value = 'updated-environment-boundary'
+    await repositoryPlugin(false).sync()
+    await environmentPlugin(false).sync()
+    requireAssertion(errors.length === 0, 'page-boundary updates report no API errors')
+    requireAssertion(writes.length === 2 && writes.every(w => w.method === 'PATCH'), 'only the two changed variables are patched, without duplicate creates')
+    requireAssertion(JSON.stringify(await repositoryPlugin(false).find()) === JSON.stringify(variables), 'repository page-two update preserves every variable')
+    requireAssertion(JSON.stringify((await environmentPlugin(false).find())[0].variables) === JSON.stringify(environmentVariables), 'environment boundary update preserves every variable')
+  } finally {
+    octokit.hook.remove('request', observe)
+  }
+  log('Phase 21 complete')
+}
+
 async function teardown () {
   logPhase('Phase 9: Teardown')
 
@@ -3598,6 +3690,7 @@ async function main () {
       ['Phase 18: Team include/exclude filters', phase18TeamIncludeExclude],
       ['Phase 19: Bypass actor convergence', phase19BypassActorConvergence],
       ['Phase 20: Custom property exclusions', phase20CustomPropertyExclusions],
+      ['Phase 21: Variable pagination', phase21VariablePagination],
       ['Phase 22: Test-org installation full-sync NOP', () => phase22InstallationFullSync(app, installationId)]
     ]
 
