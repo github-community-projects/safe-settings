@@ -3362,6 +3362,91 @@ async function phase20CustomPropertyExclusions () {
   }
 }
 
+async function phase19BypassActorConvergence () {
+  logPhase('Phase 19: Ruleset ignored bypass actor IDs and convergence')
+  const defaultBranch = await getDefaultBranch()
+  const name = 'smoke-null-bypass-actors'
+  const actor = (actorType, actorId, bypassMode = 'always') => ({
+    actor_type: actorType,
+    ...(actorId === undefined ? {} : { actor_id: actorId }),
+    bypass_mode: bypassMode
+  })
+  const steps = [
+    ['19a', 'create', [
+      actor('OrganizationAdmin', 1), actor('DeployKey', 1), actor('RepositoryRole', 4), actor('RepositoryRole', 5)
+    ], true],
+    ['19b', 'reorder and omit ignored ids', [
+      actor('RepositoryRole', 5), actor('DeployKey', null), actor('OrganizationAdmin', undefined), actor('RepositoryRole', 4)
+    ], false],
+    ['19c', 'change bypass mode and remove a real role id', [
+      actor('OrganizationAdmin', null, 'pull_request'), actor('DeployKey', null), actor('RepositoryRole', 5)
+    ], true],
+    ['19d', 'converge with concrete ignored ids', [
+      actor('RepositoryRole', 5), actor('DeployKey', 9), actor('OrganizationAdmin', 8, 'pull_request')
+    ], false]
+  ]
+  const sortActors = actors => actors.slice().sort((a, b) =>
+    `${a.actor_type}:${a.actor_id}`.localeCompare(`${b.actor_type}:${b.actor_id}`))
+  let previous
+
+  for (const [id, description, actors, changes] of steps) {
+    const branch = `smoke-test-phase${id}`
+    const attrs = {
+      name,
+      target: 'branch',
+      enforcement: 'disabled',
+      conditions: { ref_name: { include: ['~DEFAULT_BRANCH'], exclude: [] } },
+      bypass_actors: actors,
+      rules: [{ type: 'deletion' }]
+    }
+    // Keep unrelated property and pull-request-rule defaults out of NOP checks.
+    const configYaml = require('js-yaml').dump({ repository: { name: 'test' }, rulesets: [attrs] })
+    await deleteBranch(ORG, ADMIN_REPO, branch)
+    await createBranch(ORG, ADMIN_REPO, branch)
+    await createOrUpdateFile(ORG, ADMIN_REPO, `${CONFIG_PATH}/repos/test.yml`, configYaml, branch, `${id}: ${description}`)
+    const pr = await createPR(ORG, ADMIN_REPO, `${id}: bypass actors ${description}`, branch, defaultBranch)
+
+    await sleep(WEBHOOK_SETTLE_MS)
+    const checkRun = await waitForCheckRun(ORG, ADMIN_REPO, pr.head.sha)
+    if (!assert(checkRun && checkRun.conclusion === 'success', `${id}: NOP check completed successfully`)) {
+      throw new Error(`${id}: cannot apply without a successful NOP check`)
+    }
+    const summary = checkRun.output && checkRun.output.summary
+    if (changes) {
+      assert(summary && summary.includes(name), `${id}: NOP reports the changed bypass actor policy`)
+    } else {
+      assert(summary && /No changes to apply/i.test(summary), `${id}: NOP reports no changes after ignored-id/reordering changes`)
+    }
+
+    if (!await safeMerge(ORG, ADMIN_REPO, pr.number)) return
+    await sleep(WEBHOOK_SETTLE_MS)
+    const expectedActors = sortActors(actors.map(entry => actor(
+      entry.actor_type,
+      entry.actor_type === 'OrganizationAdmin' || entry.actor_type === 'DeployKey' ? null : entry.actor_id,
+      entry.bypass_mode
+    )))
+    const details = await poll(async () => {
+      const ruleset = await getRepoRuleset(ORG, 'test', name)
+      if (!ruleset) return null
+      const live = await getRepoRulesetDetails(ORG, 'test', ruleset.id)
+      if (!live || !Array.isArray(live.bypass_actors)) return null
+      const actualActors = sortActors(live.bypass_actors.map(entry => actor(entry.actor_type, entry.actor_id, entry.bypass_mode)))
+      return JSON.stringify(actualActors) === JSON.stringify(expectedActors) ? live : null
+    }, { desc: `${id}: exact bypass actors, modes and real role ids to be applied` })
+    if (!assert(details !== null, `${id}: exact actor set applied with null ignored IDs and expected real IDs`)) {
+      throw new Error(`${id}: bypass actor state did not converge`)
+    }
+    if (previous) {
+      assert(details.id === previous.id, `${id}: existing ruleset updated in place`)
+      if (!changes) {
+        assert(typeof details.updated_at === 'string' && details.updated_at === previous.updated_at, `${id}: second sync did not rewrite the ruleset`)
+      }
+    }
+    previous = details
+    await deleteBranch(ORG, ADMIN_REPO, branch)
+  }
+}
+
 async function main () {
   const { App } = await import('octokit')
   const app = new App({ appId: APP_ID, privateKey: PRIVATE_KEY })
@@ -3431,6 +3516,7 @@ async function main () {
       ['Phase 16: Ruleset name/slug resolution', phase16RulesetNameResolution],
       ['Phase 17: App installation management', phase17AppInstallations],
       ['Phase 18: Team include/exclude filters', phase18TeamIncludeExclude],
+      ['Phase 19: Bypass actor convergence', phase19BypassActorConvergence],
       ['Phase 20: Custom property exclusions', phase20CustomPropertyExclusions]
     ]
 
