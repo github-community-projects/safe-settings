@@ -1362,7 +1362,7 @@ describe('Environments Plugin test suite', () => {
 
         // assert - seven new environments were also added
         EnvironmentNamesForTheNewEnvironmentsTest.forEach(newEnvironmentName => {
-          expect(github.paginate).not.toHaveBeenCalledWith('GET /repos/{owner}/{repo}/environments/{environment_name}/variables', { owner: org, repo, new_environment_name: newEnvironmentName, per_page: 100 }, expect.any(Function))
+          expect(github.paginate).not.toHaveBeenCalledWith('GET /repos/{owner}/{repo}/environments/{environment_name}/variables', { owner: org, repo, environment_name: newEnvironmentName, per_page: 100 }, expect.any(Function))
           expect(github.request).not.toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/deployment_protection_rules', { org, repo, new_environment_name: newEnvironmentName })
           expect(github.request).toHaveBeenCalledWith('PUT /repos/:org/:repo/environments/:environment_name', expect.objectContaining({
             org,
