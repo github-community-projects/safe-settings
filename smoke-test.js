@@ -3355,7 +3355,7 @@ async function phase20CustomPropertyExclusions () {
       await cleanup(name, () => octokit.request('DELETE /orgs/{org}/properties/schema/{custom_property_name}', { org: ORG, custom_property_name: name }))
     }
     for (const branch of branches) {
-      await cleanup(branch, () => octokit.rest.git.deleteRef({ owner: ORG, repo: ADMIN_REPO, ref: `heads/${branch}` }))
+      await deleteBranch(ORG, ADMIN_REPO, branch)
     }
     if (cleanupFailed) throw new Error('Phase 20 fixture cleanup incomplete')
     log('Phase 20 owned fixtures cleaned')
