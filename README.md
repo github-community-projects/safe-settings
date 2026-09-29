@@ -1040,6 +1040,10 @@ node smoke-test.js --phase 1,19
 # Repository and environment variables, including pagination and no-op convergence
 node smoke-test.js --phase 1,13,21
 
+# Full-sync NOP with real Settings, restricted to the verified test-org installation
+# Clear harness CRON; see the spawned-server configuration warning below.
+CRON= node smoke-test.js --phase 22
+
 # Mix range + interactive
 npm run smoke-test:phase -- 1-3 interactive
 node smoke-test.js --phase 1-3 --interactive
@@ -1067,7 +1071,15 @@ The smoke test runs the following phases:
 | **Phase 13** | Tests the `variables` plugin (create, update, remove variables) |
 | **Phase 19** | Tests ignored `OrganizationAdmin`/`DeployKey` IDs, order-independent NOP convergence, real bypass-mode/role-ID changes, and no redundant updates (requires Phase 1) |
 | **Phase 21** | Reads all pages of 101 repository variables and 100 environment variables, verifies unchanged NOP/apply writes nothing, and updates only the two boundary variables (requires Phases 1 and 13) |
+| **Phase 22** | Runs real full-sync NOP against the verified `GH_ORG` installation with controlled enumeration/auth and read-only, org-scoped requests. Requires only Setup; multi-installation fanout and failure isolation are covered by unit/CLI tests, not this single-org smoke |
 | **Teardown** | Shuts down safe-settings, deletes test repos, teams, custom roles, and rulesets |
+
+The harness rejects a nonempty `CRON` before authentication or setup. However,
+the spawned Probot CLI reloads `.env` and can override explicit environment values.
+This check does not guarantee that the server's CRON, webhook forwarding, or
+enterprise verification remains disabled. Phase 22's controlled installation
+boundary applies to its direct NOP call, not the spawned server; verify the
+server's effective configuration separately before running against a shared App.
 
 GitHub [limits each environment to 100 variables](https://docs.github.com/en/actions/reference/workflows-and-actions/variables#limits-for-configuration-variables),
 so Phase 21 stays within that live limit. The phase records actual API next links
