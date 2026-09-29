@@ -10,21 +10,24 @@ Follow the [Create the GitHub App](deploy.md#create-the-github-app) guide to cre
 ## Defining the GitHub Action Workflow
 Running a full-sync with `safe-settings` can be done via `npm run full-sync`. This requires installing Node, such as with [actions/setup-node](https://github.com/actions/setup-node) (see example below). When doing so, the appropriate environment variables must be set (see the [Environment variables](#environment-variables) document for more details).
 
-Manual and scheduled (`CRON`) full syncs process every repository-owning App
-installation sequentially, using each installation's token and account login for
-its admin repository. Enterprise installations are not repository sync targets;
+When `GH_ORG` is unset, manual and scheduled (`CRON`) full syncs process every
+repository-owning App installation sequentially, using each installation's token
+and account login for its admin repository. Enterprise installations are not repository sync targets;
 they remain available for enterprise app-management context enrichment.
 An authentication, configuration, or sync failure does not stop later installations.
 The returned `{ results, errors }` retains each returned Settings result (including
 partial results) and aggregates their errors with thrown and missing-result failures.
 An info-level summary counts installations with errors as failed. `FULL_SYNC_NOP=true`
-previews every installation and still reports failures with a nonzero CLI exit.
-No eligible installations returns `null` from `syncInstallation` and exits the CLI
-nonzero with an explicit diagnostic.
+previews the selected installations and still reports failures with a nonzero CLI exit.
+With `GH_ORG` unset, no eligible installations returns `null` from
+`syncInstallation` and exits the CLI nonzero with an explicit diagnostic.
 
-`GH_ORG` does not restrict this full-sync path. Do not use a multi-installation App
-for a live single-organization test by setting `GH_ORG` alone; the smoke test's
-Phase 22 uses a controlled installation list and auth boundary instead.
+`GH_ORG` restricts full sync to the matching account and fails if no eligible
+installation matches. Startup `info()` still authenticates independently to read
+the app slug, and webhook events use their own installation contexts. A live
+single-organization smoke test therefore also needs an authentication/API boundary
+and verified runtime configuration, not just `GH_ORG`. Phase 22 uses a controlled
+installation list and auth boundary.
 
 Installation repositories are processed in batches of up to ten, with each batch
 settling before the next starts. A repository failure does not stop later
@@ -37,6 +40,12 @@ for suborg configuration changes; existing repository restrictions still apply.
 
 ### Example GHA Workflow
 The below example uses the GHA "cron" feature to run a full-sync every 4 hours. While not required, this example uses the `.github` repo as the `admin` repo (set via `ADMIN_REPO` env var) and the safe-settings configurations are stored in the `safe-settings/` directory (set via `CONFIG_PATH` and `DEPLOYMENT_CONFIG_FILE`).
+
+`GH_ORG` selects the account to sync, matching its login case-insensitively.
+Set it when the App is installed on multiple accounts; without it, full sync
+processes all repository-owning installations. If no installation matches,
+the sync exits nonzero rather than syncing another account, including in dry
+runs (`FULL_SYNC_NOP=true`).
 
 ```yaml
 name: Safe Settings Sync

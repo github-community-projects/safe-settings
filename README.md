@@ -951,6 +951,22 @@ You can pass environment variables; the easiest way to do it is via a `.env` fil
   ```
   CREATE_DEFAULT_BRANCH=true
   ```
+1. Scope CLI and cron full syncs to one account using `GH_ORG`. For e.g.
+  ```
+  GH_ORG=my-org
+  ```
+  A full sync (`CRON` or `npm run full-sync`) selects the installation whose
+  account login matches `GH_ORG` case-insensitively and reads configuration from
+  that account's `<ADMIN_REPO>`. If no installation matches, including when the
+  app has no installations, the sync fails instead of syncing another account.
+  This also applies to dry runs (`FULL_SYNC_NOP=true`); the CLI exits nonzero on
+  a targeting error, and cron reports the execution as failed.
+  When `GH_ORG` is unset, all repository-owning installations are synced
+  sequentially. Set it to restrict full sync to one account; enterprise
+  installations supply app-management context but are not repository sync targets.
+  Webhook events still use their own installation context. `GH_ORG` is also used
+  by the [manifest flow](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest)
+  to choose where the app is registered.
 
 
 ### Runtime Settings
@@ -1037,6 +1053,9 @@ node smoke-test.js --phase 1,3,5
 # Bypass actor apply/NOP convergence (Phase 1 creates the required test repo)
 node smoke-test.js --phase 1,19
 
+# Explicit GH_ORG full-sync CLI dry run (setup + Phase 24 + teardown)
+node smoke-test.js --phase 24
+
 # Repository and environment variables, including pagination and no-op convergence
 node smoke-test.js --phase 1,13,21
 
@@ -1072,6 +1091,7 @@ The smoke test runs the following phases:
 | **Phase 19** | Tests ignored `OrganizationAdmin`/`DeployKey` IDs, order-independent NOP convergence, real bypass-mode/role-ID changes, and no redundant updates (requires Phase 1) |
 | **Phase 21** | Reads all pages of 101 repository variables and 100 environment variables, verifies unchanged NOP/apply writes nothing, and updates only the two boundary variables (requires Phases 1 and 13) |
 | **Phase 22** | Runs real full-sync NOP against the verified `GH_ORG` installation with controlled enumeration/auth and read-only, org-scoped requests. Requires only Setup; multi-installation fanout and failure isolation are covered by unit/CLI tests, not this single-org smoke |
+| **Phase 24** | Runs the real full-sync CLI with explicit `GH_ORG` and `FULL_SYNC_NOP=true`, verifying the selected installation and successful completion; multi-account, no-match, and cron failure scenarios use local mocked tests |
 | **Teardown** | Shuts down safe-settings, deletes test repos, teams, custom roles, and rulesets |
 
 The harness rejects a nonempty `CRON` before authentication or setup. However,

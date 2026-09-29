@@ -416,7 +416,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
 
   async function syncInstallation (nop = false) {
     robot.log.trace('Fetching installations')
-    const installations = (await listAllInstallations()).filter(installation => {
+    let installations = (await listAllInstallations()).filter(installation => {
       // Enterprise installations supply app-management credentials, not repos.
       if (installation.target_type === 'Enterprise') {
         robot.log.debug(`Skipping enterprise installation ${installation.id} for repository sync`)
@@ -424,6 +424,17 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
       }
       return true
     })
+
+    if (env.GH_ORG) {
+      const installation = installations.find(i =>
+        typeof i.account?.login === 'string' && i.account.login.toLowerCase() === env.GH_ORG.toLowerCase()
+      )
+      if (!installation) {
+        const accounts = installations.map(i => i.account?.login).join(', ')
+        throw new Error(`No app installation found for GH_ORG '${env.GH_ORG}'. Installed on: [${accounts}]`)
+      }
+      installations = [installation]
+    }
 
     if (installations.length === 0) {
       return null
@@ -439,7 +450,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
         if (typeof owner !== 'string' || !owner.trim()) {
           throw new Error(`Installation ${installation.id} has no account login for repository sync`)
         }
-        robot.log.debug(`Syncing installation ${installation.id} for ${owner}`)
+        robot.log.info(`Syncing installation ${installation.id} on account ${owner}`)
         const github = await robot.auth(installation.id)
         const context = {
           payload: {
@@ -1055,9 +1066,10 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     cron.schedule(process.env.CRON, async () => {
       robot.log.debug('running a task every minute')
       try {
-        await syncInstallation()
+        return await syncInstallation()
       } catch (e) {
         robot.log.error(`Scheduled full sync failed: ${e}`)
+        throw e
       }
     })
   }
