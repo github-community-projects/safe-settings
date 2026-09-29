@@ -20,7 +20,7 @@ describe('repository plugin', function () {
   it('syncs repo settings', async () => {
     const pathToConfig = path.resolve(__dirname, '..', '..', 'fixtures', 'repository-config.yml')
     const configFile = Buffer.from(fs.readFileSync(pathToConfig, 'utf8'))
-    const config = yaml.safeLoad(configFile, 'utf8')
+    const config = yaml.load(configFile.toString())
     const encodedConfig = configFile.toString('base64')
     githubScope
       .get(`/repos/${repository.owner.name}/${repository.name}/contents/${settings.FILE_PATH}`)
