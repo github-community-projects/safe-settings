@@ -770,7 +770,7 @@ describe('Environments Plugin test suite', () => {
 
         // assert - the old environment was deleted
         expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/environments', { org, repo })
-        expect(github.paginate).not.toHaveBeenCalledWith('GET /repos/{owner}/{repo}/environments/{environment_name}/variables', { owner: org, repo, old_environment_name: oldEnvironmentName, per_page: 100 }, expect.any(Function))
+        expect(github.paginate).toHaveBeenCalledWith('GET /repos/{owner}/{repo}/environments/{environment_name}/variables', { owner: org, repo, environment_name: oldEnvironmentName, per_page: 100 }, expect.any(Function))
         expect(github.request).not.toHaveBeenCalledWith('GET /repos/:org/:repo/environments/:environment_name/deployment_protection_rules', { org, repo, old_environment_name: oldEnvironmentName })
         expect(github.request).toHaveBeenCalledWith('DELETE /repos/:org/:repo/environments/:environment_name', expect.objectContaining({
           org,
