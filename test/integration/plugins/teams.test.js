@@ -1,16 +1,17 @@
+const { describe, it, beforeEach, afterEach } = require('node:test')
 const path = require('path')
 const fs = require('fs')
 const { CREATED, NO_CONTENT, OK } = require('http-status-codes')
 const any = require('@travi/any')
 const settings = require('../../../lib/settings')
-const { buildTriggerEvent, initializeNock, loadInstance, repository, teardownNock } = require('../common')
+const { bodyMatching, buildTriggerEvent, initializeNock, loadInstance, repository, teardownNock } = require('../common')
 
 describe('teams plugin', function () {
   let probot, githubScope
 
-  beforeEach(() => {
+  beforeEach(async () => {
     githubScope = initializeNock()
-    probot = loadInstance()
+    probot = await loadInstance()
   })
 
   afterEach(() => {
@@ -53,16 +54,10 @@ describe('teams plugin', function () {
       .get(`/orgs/${repository.owner.name}/teams/probot`)
       .reply(OK, { id: probotTeamId })
     githubScope
-      .put(`/teams/${probotTeamId}/repos/${repository.owner.name}/${repository.name}`, body => {
-        expect(body).toMatchObject({ permission: 'admin' })
-        return true
-      })
+      .put(`/teams/${probotTeamId}/repos/${repository.owner.name}/${repository.name}`, bodyMatching({ permission: 'admin' }))
       .reply(CREATED)
     githubScope
-      .put(`/teams/${greenkeeperKeeperTeamId}/repos/${repository.owner.name}/${repository.name}`, body => {
-        expect(body).toMatchObject({ permission: 'push' })
-        return true
-      })
+      .put(`/teams/${greenkeeperKeeperTeamId}/repos/${repository.owner.name}/${repository.name}`, bodyMatching({ permission: 'push' }))
       .reply(OK)
     githubScope
       .delete(`/teams/${formationTeamId}/repos/${repository.owner.name}/${repository.name}`)

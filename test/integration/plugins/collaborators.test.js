@@ -1,15 +1,16 @@
+const { describe, it, beforeEach, afterEach } = require('node:test')
 const path = require('path')
 const fs = require('fs')
 const { CREATED, NO_CONTENT, OK } = require('http-status-codes')
 const settings = require('../../../lib/settings')
-const { buildTriggerEvent, initializeNock, loadInstance, repository, teardownNock } = require('../common')
+const { bodyMatching, buildTriggerEvent, initializeNock, loadInstance, repository, teardownNock } = require('../common')
 
 describe('collaborators plugin', function () {
   let probot, githubScope
 
-  beforeEach(() => {
+  beforeEach(async () => {
     githubScope = initializeNock()
-    probot = loadInstance()
+    probot = await loadInstance()
   })
 
   afterEach(() => {
@@ -33,10 +34,7 @@ describe('collaborators plugin', function () {
         ]
       )
     githubScope
-      .put(`/repos/${repository.owner.name}/${repository.name}/collaborators/hubot`, body => {
-        expect(body).toMatchObject({ permission: 'pull' })
-        return true
-      })
+      .put(`/repos/${repository.owner.name}/${repository.name}/collaborators/hubot`, bodyMatching({ permission: 'pull' }))
       .reply(CREATED)
     githubScope
       .delete(`/repos/${repository.owner.name}/${repository.name}/collaborators/travi`)

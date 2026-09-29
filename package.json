@@ -19,7 +19,8 @@
     "test:unit:ci": "npm run test:unit --reporters=default --reporters=github-actions",
     "test:me": "jest ",
     "test:unit:watch": "npm run test:unit -- --watch",
-    "test:integration": "jest --roots=lib --roots=test/integration",
+    "test:integration": "node --test --test-reporter=spec \"test/integration/**/*.test.js\"",
+    "test:integration:ci": "node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=reports/integration-junit.xml \"test/integration/**/*.test.js\"",
     "test:integration:debug": "LOG_LEVEL=debug DEBUG=nock run-s test:integration",
     "smoke-test": "node smoke-test.js",
     "smoke-test:interactive": "node smoke-test.js --interactive",
@@ -78,6 +79,10 @@
     "reporters": [
       "default",
       "jest-junit"
+    ],
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "<rootDir>/test/integration/"
     ]
   },
   "jest-junit": {

@@ -1,15 +1,16 @@
+const { describe, it, beforeEach, afterEach } = require('node:test')
 const path = require('path')
 const fs = require('fs')
 const yaml = require('js-yaml')
 const settings = require('../../../lib/settings')
-const { buildTriggerEvent, initializeNock, loadInstance, repository, teardownNock } = require('../common')
+const { bodyMatching, buildTriggerEvent, initializeNock, loadInstance, repository, teardownNock } = require('../common')
 
 describe('repository plugin', function () {
   let probot, githubScope
 
-  beforeEach(() => {
+  beforeEach(async () => {
     githubScope = initializeNock()
-    probot = loadInstance()
+    probot = await loadInstance()
   })
 
   afterEach(() => {
@@ -25,10 +26,7 @@ describe('repository plugin', function () {
       .get(`/repos/${repository.owner.name}/${repository.name}/contents/${settings.FILE_PATH}`)
       .reply(200, { content: encodedConfig, name: 'settings.yml', type: 'file' })
     githubScope
-      .patch(`/repos/${repository.owner.name}/${repository.name}`, body => {
-        expect(body).toMatchObject(config.repository)
-        return true
-      })
+      .patch(`/repos/${repository.owner.name}/${repository.name}`, bodyMatching(config.repository))
       .matchHeader('accept', ['application/vnd.github.baptiste-preview+json'])
       .reply(200)
 

@@ -1,15 +1,16 @@
+const { describe, it, beforeEach, afterEach } = require('node:test')
 const path = require('path')
 const fs = require('fs')
 const { CREATED, NO_CONTENT, OK } = require('http-status-codes')
 const settings = require('../../../lib/settings')
-const { buildTriggerEvent, initializeNock, loadInstance, repository, teardownNock } = require('../common')
+const { bodyMatching, buildTriggerEvent, initializeNock, loadInstance, repository, teardownNock } = require('../common')
 
 describe('milestones plugin', function () {
   let probot, githubScope
 
-  beforeEach(() => {
+  beforeEach(async () => {
     githubScope = initializeNock()
-    probot = loadInstance()
+    probot = await loadInstance()
   })
 
   afterEach(() => {
@@ -46,24 +47,18 @@ describe('milestones plugin', function () {
         ]
       )
     githubScope
-      .post(`/repos/${repository.owner.name}/${repository.name}/milestones`, body => {
-        expect(body).toMatchObject({
-          title: 'new-milestone',
-          description: 'this milestone should get added',
-          state: 'open'
-        })
-        return true
-      })
+      .post(`/repos/${repository.owner.name}/${repository.name}/milestones`, bodyMatching({
+        title: 'new-milestone',
+        description: 'this milestone should get added',
+        state: 'open'
+      }))
       .reply(CREATED)
     githubScope
-      .patch(`/repos/${repository.owner.name}/${repository.name}/milestones/42`, body => {
-        expect(body).toMatchObject({
-          title: 'existing-milestone',
-          description: 'this milestone should get updated',
-          state: 'closed'
-        })
-        return true
-      })
+      .patch(`/repos/${repository.owner.name}/${repository.name}/milestones/42`, bodyMatching({
+        title: 'existing-milestone',
+        description: 'this milestone should get updated',
+        state: 'closed'
+      }))
       .reply(OK)
     githubScope
       .delete(`/repos/${repository.owner.name}/${repository.name}/milestones/8`)

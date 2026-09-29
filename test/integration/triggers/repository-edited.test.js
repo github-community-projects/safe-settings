@@ -1,3 +1,4 @@
+const { describe, it, beforeEach, afterEach } = require('node:test')
 const { NOT_FOUND } = require('http-status-codes')
 const any = require('@travi/any')
 const settings = require('../../../lib/settings')
@@ -6,9 +7,9 @@ const { buildRepositoryEditedEvent, initializeNock, loadInstance, repository, te
 describe('repository.edited trigger', function () {
   let probot, githubScope
 
-  beforeEach(() => {
+  beforeEach(async () => {
     githubScope = initializeNock()
-    probot = loadInstance()
+    probot = await loadInstance()
   })
 
   afterEach(() => {

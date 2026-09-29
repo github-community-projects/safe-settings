@@ -1,12 +1,13 @@
+const { describe, it, beforeEach, afterEach } = require('node:test')
 const settings = require('../../../lib/settings')
 const { initializeNock, loadInstance, repository, teardownNock } = require('../common')
 
 describe('push trigger', function () {
   let probot, githubScope
 
-  beforeEach(() => {
+  beforeEach(async () => {
     githubScope = initializeNock()
-    probot = loadInstance()
+    probot = await loadInstance()
   })
 
   afterEach(() => {

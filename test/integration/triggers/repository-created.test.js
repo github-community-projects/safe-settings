@@ -1,3 +1,4 @@
+const { describe, it, beforeEach, afterEach } = require('node:test')
 const { NOT_FOUND } = require('http-status-codes')
 const settings = require('../../../lib/settings')
 const { buildRepositoryCreatedEvent, initializeNock, loadInstance, repository, teardownNock } = require('../common')
@@ -5,9 +6,9 @@ const { buildRepositoryCreatedEvent, initializeNock, loadInstance, repository, t
 describe('repository.created trigger', function () {
   let probot, githubScope
 
-  beforeEach(() => {
+  beforeEach(async () => {
     githubScope = initializeNock()
-    probot = loadInstance()
+    probot = await loadInstance()
   })
 
   afterEach(() => {
