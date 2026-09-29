@@ -15,6 +15,7 @@ describe('configuration read error reporting', () => {
     jest.replaceProperty(env, 'CONFIG_PATH', '.github')
     jest.replaceProperty(env, 'SETTINGS_FILE_PATH', 'settings.yml')
     jest.replaceProperty(env, 'CREATE_PR_COMMENT', 'true')
+    jest.replaceProperty(env, 'GH_ORG', 'test-org')
     jest.spyOn(fs, 'existsSync').mockReturnValue(false)
     handlers = new Map()
     const installation = { id: 123, account: { login: 'test-org' } }
@@ -65,10 +66,14 @@ describe('configuration read error reporting', () => {
     Object.assign(new Error('Connection reset'), { code: 'ECONNRESET' })
   ]
 
-  it.each(errors)('preserves %s through the full-sync entry point', async error => {
+  it.each(errors)('preserves %s in the full-sync error aggregate', async error => {
     github.rest.repos.getContent.mockRejectedValue(error)
 
-    await expect(app.syncInstallation(false)).rejects.toBe(error)
+    const result = await app.syncInstallation(false)
+
+    expect(result.results).toEqual([])
+    expect(result.errors).toHaveLength(1)
+    expect(result.errors[0]).toBe(error)
     expect(github.rest.repos.getContent).toHaveBeenCalledWith({
       owner: 'test-org',
       repo: 'admin',

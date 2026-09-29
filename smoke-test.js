@@ -148,6 +148,7 @@ class InteractiveExit extends Error {
 // ─── Octokit client (initialized in main) ────────────────────────────────────
 
 let octokit = null
+let orgInstallation = null
 // Enterprise-installation-authenticated client (Phase 17). Null when the app
 // is not installed on the enterprise or GH_ENTERPRISE is unset.
 let entOctokit = null
@@ -2472,6 +2473,98 @@ async function phase14RegressionCoverage () {
   }
 }
 
+async function phase21VariablePagination () {
+  logPhase('Phase 21: Variable pagination - 101 repository variables and 100 environment variables')
+  const Variables = require('./lib/plugins/variables')
+  const Environments = require('./lib/plugins/environments')
+  const target = { owner: ORG, repo: 'test' }
+  const environmentName = 'smoke-pagination'
+  const variables = Array.from({ length: 101 }, (_, i) => ({
+    name: `SMOKE_PAGE_${String(i).padStart(3, '0')}`,
+    value: `value-${i}`
+  }))
+  // GitHub permits only 100 variables per environment. The transport tests
+  // also cover 101 environment variables; this phase stays within the live limit.
+  const environmentVariables = variables.slice(0, 100).map(v => ({ ...v, name: v.name.toLowerCase() }))
+  const errors = []
+  const pluginLog = { debug () {}, info: log, error: log }
+  const repositoryPlugin = nop => new Variables(nop, octokit, target, structuredClone(variables), pluginLog, errors)
+  const environmentPlugin = nop => new Environments(nop, octokit, target, [{ name: environmentName, variables: structuredClone(environmentVariables) }], pluginLog, errors)
+  const requireAssertion = (condition, message) => {
+    if (!assert(condition, `21: ${message}`)) throw new Error(`Phase 21: ${message}`)
+  }
+
+  requireAssertion((await repositoryPlugin(false).find()).length === 0, 'repository fixture starts empty after phase 13')
+  const { data: environments } = await octokit.request('GET /repos/{owner}/{repo}/environments', target)
+  requireAssertion(environments.environments.length === 0, 'no pre-existing environments are overwritten')
+  await octokit.request('PUT /repos/{owner}/{repo}/environments/{environment_name}', { ...target, environment_name: environmentName })
+  requireAssertion((await environmentPlugin(false).find())[0].variables.length === 0, 'empty environment variable page maps to an empty list')
+
+  log('Seeding pagination fixtures sequentially (one write per second)...')
+  for (const variable of variables) {
+    await octokit.request('POST /repos/{owner}/{repo}/actions/variables', { ...target, ...variable })
+    await sleep(1000)
+  }
+  for (const variable of environmentVariables) {
+    await octokit.request('POST /repos/{owner}/{repo}/environments/{environment_name}/variables', { ...target, environment_name: environmentName, ...variable })
+    await sleep(1000)
+  }
+
+  const writes = []
+  const variableReads = []
+  const environmentReads = []
+  const observe = async (request, options) => {
+    if (options.method !== 'GET') writes.push({ method: options.method, url: options.url })
+    const response = await request(options)
+    if (options.method === 'GET' && Array.isArray(response.data.variables)) {
+      const reads = options.url.includes('/actions/variables') ? variableReads : environmentReads
+      reads.push({
+        url: octokit.request.endpoint(options).url,
+        next: (response.headers.link || '').match(/<([^>]+)>;\s*rel="next"/)?.[1],
+        count: response.data.variables.length
+      })
+    }
+    return response
+  }
+  const followsPages = (pages, count) => pages.length > 0 &&
+    pages.reduce((sum, page) => sum + page.count, 0) === count &&
+    pages.every((page, index) =>
+      page.count > 0 && page.count <= 100 &&
+      new URL(page.url).searchParams.get('per_page') === '100' &&
+      page.next === pages[index + 1]?.url)
+  octokit.hook.wrap('request', observe)
+  try {
+    const found = await repositoryPlugin(false).find()
+    requireAssertion(JSON.stringify(found) === JSON.stringify(variables), 'all 101 repository names and values are returned in their original shape')
+    log(`Repository variable page evidence: ${JSON.stringify(variableReads)}`)
+    requireAssertion(variableReads.length > 1 && followsPages(variableReads, 101),
+      'repository listing follows every API next link with per_page=100, even when the server returns smaller pages')
+    const foundEnvironment = await environmentPlugin(false).find()
+    requireAssertion(JSON.stringify(foundEnvironment[0].variables) === JSON.stringify(environmentVariables), 'all 100 environment names and values are normalized correctly')
+    log(`Environment variable page evidence: ${JSON.stringify(environmentReads)}`)
+    requireAssertion(followsPages(environmentReads, 100), 'environment listing follows every API next link with per_page=100')
+
+    for (const nop of [true, false]) {
+      const repoResult = await repositoryPlugin(nop).sync()
+      const envResult = await environmentPlugin(nop).sync()
+      requireAssertion(!nop || ((repoResult === undefined || repoResult.length === 0) && envResult.length === 0), 'unchanged NOP returns no proposed variable changes')
+      requireAssertion(errors.length === 0 && writes.length === 0, `${nop ? 'NOP' : 'apply'} creates no duplicates and performs no updates`)
+    }
+
+    variables[100].value = 'updated-page-two'
+    environmentVariables[99].value = 'updated-environment-boundary'
+    await repositoryPlugin(false).sync()
+    await environmentPlugin(false).sync()
+    requireAssertion(errors.length === 0, 'page-boundary updates report no API errors')
+    requireAssertion(writes.length === 2 && writes.every(w => w.method === 'PATCH'), 'only the two changed variables are patched, without duplicate creates')
+    requireAssertion(JSON.stringify(await repositoryPlugin(false).find()) === JSON.stringify(variables), 'repository page-two update preserves every variable')
+    requireAssertion(JSON.stringify((await environmentPlugin(false).find())[0].variables) === JSON.stringify(environmentVariables), 'environment boundary update preserves every variable')
+  } finally {
+    octokit.hook.remove('request', observe)
+  }
+  log('Phase 21 complete')
+}
+
 async function teardown () {
   logPhase('Phase 9: Teardown')
 
@@ -3488,7 +3581,128 @@ async function phase23ConfigLoading () {
   }
 }
 
+async function phase24OrganizationSyncTargeting () {
+  logPhase('Phase 24: Organization-targeted full-sync dry run')
+  if (!assert(process.env.GH_ORG && orgInstallation?.account?.login?.toLowerCase() === ORG.toLowerCase(),
+    '24: explicit GH_ORG matches the authenticated test installation')) {
+    throw new Error('Phase 24 requires an explicitly configured and verified test organization')
+  }
+
+  const result = await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [path.join(__dirname, 'full-sync.js')], {
+      cwd: __dirname,
+      env: {
+        ...process.env,
+        GH_ORG: ORG,
+        FULL_SYNC_NOP: 'true',
+        CRON: '',
+        LOG_LEVEL: 'info'
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 120000
+    })
+    let output = ''
+    child.stdout.on('data', data => { output += data })
+    child.stderr.on('data', data => { output += data })
+    child.on('error', error => {
+      logFail(`24: could not start full-sync CLI: ${error.message}`)
+      reject(error)
+    })
+    child.on('close', (code, signal) => resolve({ code, signal, output }))
+  })
+
+  const selected = [...result.output.matchAll(/Syncing installation (\d+) on account ([A-Za-z0-9-]+)/g)]
+  assert(result.code === 0, `24: full-sync CLI exited successfully (code=${result.code}, signal=${result.signal})`)
+  assert(result.output.includes('Starting full sync with NOP=true'), '24: full-sync CLI ran in NOP mode')
+  assert(selected.length === 1 && Number(selected[0][1]) === orgInstallation.id &&
+    selected[0][2].toLowerCase() === ORG.toLowerCase(),
+  '24: sync selected exactly the authenticated test organization installation')
+  assert(result.output.includes('Full sync completed successfully.'), '24: actual full-sync entrypoint completed')
+  assert(!/Unexpected error during full sync|Fatal error during full sync|Errors occurred during full sync/.test(result.output),
+    '24: full-sync CLI reported no failure')
+}
+
+async function phase22InstallationFullSync (app, installationId) {
+  logPhase('Phase 22: Test-org installation full-sync NOP')
+  if (!process.env.GH_ORG || process.env.GH_ORG.toLowerCase() !== ORG.toLowerCase() || process.env.CRON) {
+    throw new Error('Phase 22 requires an explicit GH_ORG and CRON unset')
+  }
+  const { data: installation } = await app.octokit.rest.apps.getInstallation({ installation_id: installationId })
+  if (installation.id !== installationId || installation.target_type !== 'Organization' ||
+      installation.account?.login?.toLowerCase() !== ORG.toLowerCase()) {
+    throw new Error('Phase 22 installation does not match the authorized test organization')
+  }
+  const { data: appInfo } = await app.octokit.rest.apps.getAuthenticated()
+  const { data: admin } = await octokit.rest.repos.get({ owner: ORG, repo: ADMIN_REPO })
+  if (admin.owner.login.toLowerCase() !== ORG.toLowerCase()) {
+    throw new Error('Phase 22 admin repository owner does not match the test organization')
+  }
+
+  // Exercise real Settings and GitHub reads, but never enumerate/sync other
+  // installations. info() receives already-verified App metadata.
+  const repoClient = Object.create(octokit)
+  repoClient.rest = {
+    ...octokit.rest,
+    apps: { ...octokit.rest.apps, getAuthenticated: async () => ({ data: appInfo }) }
+  }
+  const listRoute = { url: '/app/installations', method: 'GET' }
+  const appClient = {
+    rest: { apps: { listInstallations: { endpoint: { merge: () => listRoute } } } },
+    paginate: async route => {
+      if (route !== listRoute) throw new Error('Phase 22 unexpected App request')
+      return [installation]
+    }
+  }
+  const summaries = []
+  const logger = {
+    trace: () => {},
+    debug: () => {},
+    info: message => { summaries.push(message); log(message) },
+    warn: message => log(`Warning: ${message}`),
+    error: message => logFail(`22: ${message}`)
+  }
+  const readOnlyTestOrg = options => {
+    const request = octokit.request.endpoint(options)
+    const pathname = new URL(request.url).pathname.toLowerCase().replace(/^\/api\/v3/, '')
+    const owner = ORG.toLowerCase()
+    const inOrg = pathname === `/orgs/${owner}` || pathname.startsWith(`/orgs/${owner}/`) ||
+      pathname.startsWith(`/repos/${owner}/`) || pathname === '/installation/repositories'
+    if (request.method !== 'GET' || !inOrg) {
+      throw new Error('Phase 22 blocked a non-read-only or out-of-org request')
+    }
+  }
+  octokit.hook.before('request', readOnlyTestOrg)
+  try {
+    const instance = require('./index')({
+      on: () => {},
+      log: logger,
+      auth: async id => {
+        if (id === undefined) return appClient
+        if (id !== installationId) throw new Error('Phase 22 blocked authentication outside the test organization')
+        return repoClient
+      }
+    }, {})
+    const aggregate = await instance.syncInstallation(true)
+    if (!assert(aggregate?.results?.length === 1, '22: exactly one verified installation returned a result')) return
+    const result = aggregate.results[0]
+    assert(aggregate.errors.length === 0, '22: no aggregate full-sync errors')
+    assert(result.errors.length === 0, '22: real Settings reports no errors')
+    assert(result.nop === true, '22: real Settings ran in NOP mode')
+    assert(result.installation_id === installationId, '22: Settings used the verified installation ID')
+    assert(result.repo.owner.toLowerCase() === ORG.toLowerCase(), '22: Settings used the authorized test-org owner')
+    assert(result.github === repoClient, '22: Settings used the test-org authenticated client')
+    assert(result.processedRepoNames.has(ADMIN_REPO), '22: real installation repository enumeration included the admin repo')
+    assert(summaries.filter(message => message === 'Synced 1 of 1 installation(s); 0 failed').length === 1,
+      '22: successful installation summary logged exactly once')
+  } finally {
+    octokit.hook.remove('request', readOnlyTestOrg)
+  }
+}
+
 async function main () {
+  if (process.env.CRON) {
+    throw new Error('Smoke tests require CRON unset to avoid syncing other installations')
+  }
   const { App } = await import('octokit')
   const app = new App({ appId: APP_ID, privateKey: PRIVATE_KEY })
 
@@ -3498,6 +3712,7 @@ async function main () {
     // Org/user installations key off account.login (only enterprise accounts have a slug).
     if (installation.account && installation.account.login && installation.account.login.toLowerCase() === ORG.toLowerCase()) {
       installationId = installation.id
+      orgInstallation = installation
       break
     }
   }
@@ -3559,7 +3774,10 @@ async function main () {
       ['Phase 18: Team include/exclude filters', phase18TeamIncludeExclude],
       ['Phase 19: Bypass actor convergence', phase19BypassActorConvergence],
       ['Phase 20: Custom property exclusions', phase20CustomPropertyExclusions],
-      ['Phase 23: Config loading', phase23ConfigLoading]
+      ['Phase 21: Variable pagination', phase21VariablePagination],
+      ['Phase 22: Test-org installation full-sync NOP', () => phase22InstallationFullSync(app, installationId)],
+      ['Phase 23: Config loading', phase23ConfigLoading],
+      ['Phase 24: Organization sync targeting', phase24OrganizationSyncTargeting]
     ]
 
     // When --phase is given, only run setup (phase 0) + the requested phase(s).
