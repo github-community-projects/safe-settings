@@ -1063,7 +1063,15 @@ The smoke test runs the following phases:
 | **Phase 12** | Tests `custom_properties` plugin |
 | **Phase 13** | Tests the `variables` plugin (create, update, remove variables) |
 | **Phase 19** | Tests ignored `OrganizationAdmin`/`DeployKey` IDs, order-independent NOP convergence, real bypass-mode/role-ID changes, and no redundant updates (requires Phase 1) |
+| **Phase 23** | Tests real config loading, empty YAML, directories, and missing-file/ref HTTP 404s on an owned temporary branch (requires only Setup) |
 | **Teardown** | Shuts down safe-settings, deletes test repos, teams, custom roles, and rulesets |
+
+Run config-loading and existing config-validation coverage with
+`node smoke-test.js --phase 10,23` (Setup and Teardown run automatically).
+Phase 23 removes its temporary `smoke-test-phase23` branch even on failure.
+HTTP 403/500 and network failures are injected only in local unit tests, which
+also verify original-error identity and full-sync/NOP reporting; the live smoke
+does not change permissions or provoke rate limits.
 
 ### Output
 

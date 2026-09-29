@@ -3447,6 +3447,47 @@ async function phase19BypassActorConvergence () {
   }
 }
 
+async function phase23ConfigLoading () {
+  logPhase('Phase 23: Config loading')
+  const ConfigManager = require('./lib/configManager')
+  const env = require('./lib/env')
+  const branch = 'smoke-test-phase23'
+  const filePath = path.posix.join(CONFIG_PATH, env.SETTINGS_FILE_PATH)
+  const context = {
+    repo: () => ({ owner: ORG, repo: ADMIN_REPO }),
+    octokit,
+    log: { error: log, debug: log, info: log }
+  }
+  const manager = new ConfigManager(context, branch)
+  let created = false
+  try {
+    // Creating rather than replacing the ref protects any pre-existing branch.
+    await createBranch(ORG, ADMIN_REPO, branch)
+    created = true
+    await createOrUpdateFile(ORG, ADMIN_REPO, filePath, 'repository:\n  has_wiki: false\n', branch, '23: config loading fixture')
+    assert(JSON.stringify(await manager.loadGlobalSettingsYaml()) === JSON.stringify({ repository: { has_wiki: false } }),
+      '23: real global config is parsed from the requested branch')
+    await createOrUpdateFile(ORG, ADMIN_REPO, filePath, '# empty\n', branch, '23: empty config fixture')
+    assert(JSON.stringify(await manager.loadGlobalSettingsYaml()) === '{}', '23: empty YAML returns an empty object')
+    assert(await manager.loadYaml(CONFIG_PATH) === null, '23: real directory response returns null')
+    assert(await manager.loadYaml(path.posix.join(CONFIG_PATH, 'smoke-missing-config-23.yml')) === null,
+      '23: missing config file returns null on real HTTP 404')
+    assert(await new ConfigManager(context, `${branch}-missing`).loadGlobalSettingsYaml() === null,
+      '23: missing ref returns null on real HTTP 404')
+  } catch (error) {
+    logFail(`23: config loading failed: ${error.message}`)
+    throw error
+  } finally {
+    if (created) {
+      try {
+        await octokit.rest.git.deleteRef({ owner: ORG, repo: ADMIN_REPO, ref: `heads/${branch}` })
+      } catch (error) {
+        logFail(`23: could not remove fixture branch: ${error.message}`)
+      }
+    }
+  }
+}
+
 async function main () {
   const { App } = await import('octokit')
   const app = new App({ appId: APP_ID, privateKey: PRIVATE_KEY })
@@ -3517,7 +3558,8 @@ async function main () {
       ['Phase 17: App installation management', phase17AppInstallations],
       ['Phase 18: Team include/exclude filters', phase18TeamIncludeExclude],
       ['Phase 19: Bypass actor convergence', phase19BypassActorConvergence],
-      ['Phase 20: Custom property exclusions', phase20CustomPropertyExclusions]
+      ['Phase 20: Custom property exclusions', phase20CustomPropertyExclusions],
+      ['Phase 23: Config loading', phase23ConfigLoading]
     ]
 
     // When --phase is given, only run setup (phase 0) + the requested phase(s).
