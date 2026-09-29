@@ -3573,7 +3573,7 @@ async function phase23ConfigLoading () {
   } finally {
     if (created) {
       try {
-        await octokit.rest.git.deleteRef({ owner: ORG, repo: ADMIN_REPO, ref: `heads/${branch}` })
+        await deleteBranch(ORG, ADMIN_REPO, branch)
       } catch (error) {
         logFail(`23: could not remove fixture branch: ${error.message}`)
       }
