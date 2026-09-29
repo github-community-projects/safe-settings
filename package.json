@@ -20,7 +20,7 @@
     "test:me": "jest ",
     "test:unit:watch": "npm run test:unit -- --watch",
     "test:integration": "node --test --test-reporter=spec \"test/integration/**/*.test.js\"",
-    "test:integration:ci": "node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=reports/integration-junit.xml \"test/integration/**/*.test.js\"",
+    "test:integration:ci": "mkdir -p reports && node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=reports/integration-junit.xml \"test/integration/**/*.test.js\"",
 "test:pagination": "node --test test/transport/variables.test.cjs",
     "test:integration:debug": "LOG_LEVEL=debug DEBUG=nock run-s test:integration",
     "smoke-test": "node smoke-test.js",
