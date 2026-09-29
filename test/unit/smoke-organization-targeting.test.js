@@ -8,7 +8,7 @@ const smokePath = path.resolve(__dirname, '../../smoke-test.js')
 const source = fs.readFileSync(smokePath, 'utf8')
 const phaseSource = source.slice(
   source.indexOf('async function phase24OrganizationSyncTargeting ()'),
-  source.indexOf('async function main ()')
+  source.indexOf('\n}\n', source.indexOf('async function phase24OrganizationSyncTargeting ()')) + 2
 )
 
 describe('organization-targeted smoke phase', () => {
