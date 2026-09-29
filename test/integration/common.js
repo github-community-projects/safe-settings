@@ -13,13 +13,20 @@ const ERROR_LEVELS = new Set(['error', 'fatal'])
 nock.disableNetConnect()
 
 const repository = {
+  id: 1,
   default_branch: 'master',
   name: 'botland',
   owner: {
+    id: 2,
+    login: 'bkeepers-inc',
     name: 'bkeepers-inc',
-    email: null
+    email: null,
+    type: 'Organization'
   }
 }
+const organization = { id: repository.owner.id, login: repository.owner.login }
+const sender = { id: 3, login: 'hubot', type: 'User' }
+const installation = { id: 4, account: organization }
 
 // State for the currently running test. `node --test` runs each file in its
 // own process and the tests within a file sequentially, so a single slot is
@@ -105,6 +112,32 @@ function initializeNock () {
   return nock(GITHUB_API)
 }
 
+function mockAdminRepository (githubScope, configContent, subOrgRequests = 1) {
+  const configRequest = githubScope
+    .get(`/repos/${repository.owner.login}/admin/contents/${encodeURIComponent(settings.FILE_PATH)}`)
+  if (configContent) {
+    configRequest.reply(200, { content: configContent, name: 'settings.yml', type: 'file' })
+  } else {
+    configRequest.reply(404, {
+      message: 'Not Found',
+      documentation_url: 'https://docs.github.com/rest/repos/contents#get-repository-content'
+    })
+  }
+  githubScope
+    .get(`/repos/${repository.owner.login}/admin/contents/${encodeURIComponent('.github/suborgs')}`)
+    .times(subOrgRequests)
+    .reply(404)
+  githubScope
+    .get(`/repos/${repository.owner.login}/admin/contents/.github`)
+    .reply(200, [])
+  githubScope
+    .get(`/repos/${repository.owner.login}/admin/commits`)
+    .reply(200, [{ sha: 'admin-head-sha' }])
+  githubScope
+    .post(`/repos/${repository.owner.login}/admin/check-runs`)
+    .reply(201, { id: 1 })
+}
+
 /**
  * Nock request-body matcher equivalent to Jest's `toMatchObject`. Mismatches
  * are recorded and reported by `teardownNock` to explain unmatched requests.
@@ -153,12 +186,15 @@ function teardownNock (githubScope) {
   }
 }
 
-function buildPushEvent () {
+function buildPushEvent (branch = 'master') {
   return {
     name: 'push',
     payload: {
-      ref: 'refs/heads/master',
+      ref: `refs/heads/${branch}`,
       repository,
+      organization,
+      sender,
+      installation,
       commits: [{ modified: [settings.FILE_PATH], added: [] }]
     }
   }
@@ -169,7 +205,10 @@ function buildRepositoryEditedEvent () {
     name: 'repository.edited',
     payload: {
       changes: { default_branch: { from: any.word() } },
-      repository
+      repository,
+      organization,
+      sender,
+      installation
     }
   }
 }
@@ -177,20 +216,22 @@ function buildRepositoryEditedEvent () {
 function buildRepositoryCreatedEvent () {
   return {
     name: 'repository.created',
-    payload: { repository }
+    payload: { repository, organization, sender, installation }
   }
 }
 
 function buildTriggerEvent () {
-  return any.fromList([buildPushEvent(), buildRepositoryCreatedEvent(), buildRepositoryEditedEvent()])
+  return buildRepositoryCreatedEvent()
 }
 
 module.exports = {
   GITHUB_API,
   loadInstance,
   initializeNock,
+  mockAdminRepository,
   teardownNock,
   bodyMatching,
+  buildPushEvent,
   buildTriggerEvent,
   buildRepositoryCreatedEvent,
   buildRepositoryEditedEvent,
