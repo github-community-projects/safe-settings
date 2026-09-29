@@ -3447,7 +3447,87 @@ async function phase19BypassActorConvergence () {
   }
 }
 
+async function phase22InstallationFullSync (app, installationId) {
+  logPhase('Phase 22: Test-org installation full-sync NOP')
+  if (!process.env.GH_ORG || process.env.GH_ORG.toLowerCase() !== ORG.toLowerCase() || process.env.CRON) {
+    throw new Error('Phase 22 requires an explicit GH_ORG and CRON unset')
+  }
+  const { data: installation } = await app.octokit.rest.apps.getInstallation({ installation_id: installationId })
+  if (installation.id !== installationId || installation.target_type !== 'Organization' ||
+      installation.account?.login?.toLowerCase() !== ORG.toLowerCase()) {
+    throw new Error('Phase 22 installation does not match the authorized test organization')
+  }
+  const { data: appInfo } = await app.octokit.rest.apps.getAuthenticated()
+  const { data: admin } = await octokit.rest.repos.get({ owner: ORG, repo: ADMIN_REPO })
+  if (admin.owner.login.toLowerCase() !== ORG.toLowerCase()) {
+    throw new Error('Phase 22 admin repository owner does not match the test organization')
+  }
+
+  // Exercise real Settings and GitHub reads, but never enumerate/sync other
+  // installations. info() receives already-verified App metadata.
+  const repoClient = Object.create(octokit)
+  repoClient.rest = {
+    ...octokit.rest,
+    apps: { ...octokit.rest.apps, getAuthenticated: async () => ({ data: appInfo }) }
+  }
+  const listRoute = { url: '/app/installations', method: 'GET' }
+  const appClient = {
+    rest: { apps: { listInstallations: { endpoint: { merge: () => listRoute } } } },
+    paginate: async route => {
+      if (route !== listRoute) throw new Error('Phase 22 unexpected App request')
+      return [installation]
+    }
+  }
+  const summaries = []
+  const logger = {
+    trace: () => {},
+    debug: () => {},
+    info: message => { summaries.push(message); log(message) },
+    warn: message => log(`Warning: ${message}`),
+    error: message => logFail(`22: ${message}`)
+  }
+  const readOnlyTestOrg = options => {
+    const request = octokit.request.endpoint(options)
+    const pathname = new URL(request.url).pathname.toLowerCase().replace(/^\/api\/v3/, '')
+    const owner = ORG.toLowerCase()
+    const inOrg = pathname === `/orgs/${owner}` || pathname.startsWith(`/orgs/${owner}/`) ||
+      pathname.startsWith(`/repos/${owner}/`) || pathname === '/installation/repositories'
+    if (request.method !== 'GET' || !inOrg) {
+      throw new Error('Phase 22 blocked a non-read-only or out-of-org request')
+    }
+  }
+  octokit.hook.before('request', readOnlyTestOrg)
+  try {
+    const instance = require('./index')({
+      on: () => {},
+      log: logger,
+      auth: async id => {
+        if (id === undefined) return appClient
+        if (id !== installationId) throw new Error('Phase 22 blocked authentication outside the test organization')
+        return repoClient
+      }
+    }, {})
+    const aggregate = await instance.syncInstallation(true)
+    if (!assert(aggregate?.results?.length === 1, '22: exactly one verified installation returned a result')) return
+    const result = aggregate.results[0]
+    assert(aggregate.errors.length === 0, '22: no aggregate full-sync errors')
+    assert(result.errors.length === 0, '22: real Settings reports no errors')
+    assert(result.nop === true, '22: real Settings ran in NOP mode')
+    assert(result.installation_id === installationId, '22: Settings used the verified installation ID')
+    assert(result.repo.owner.toLowerCase() === ORG.toLowerCase(), '22: Settings used the authorized test-org owner')
+    assert(result.github === repoClient, '22: Settings used the test-org authenticated client')
+    assert(result.processedRepoNames.has(ADMIN_REPO), '22: real installation repository enumeration included the admin repo')
+    assert(summaries.filter(message => message === 'Synced 1 of 1 installation(s); 0 failed').length === 1,
+      '22: successful installation summary logged exactly once')
+  } finally {
+    octokit.hook.remove('request', readOnlyTestOrg)
+  }
+}
+
 async function main () {
+  if (process.env.CRON) {
+    throw new Error('Smoke tests require CRON unset to avoid syncing other installations')
+  }
   const { App } = await import('octokit')
   const app = new App({ appId: APP_ID, privateKey: PRIVATE_KEY })
 
@@ -3517,7 +3597,8 @@ async function main () {
       ['Phase 17: App installation management', phase17AppInstallations],
       ['Phase 18: Team include/exclude filters', phase18TeamIncludeExclude],
       ['Phase 19: Bypass actor convergence', phase19BypassActorConvergence],
-      ['Phase 20: Custom property exclusions', phase20CustomPropertyExclusions]
+      ['Phase 20: Custom property exclusions', phase20CustomPropertyExclusions],
+      ['Phase 22: Test-org installation full-sync NOP', () => phase22InstallationFullSync(app, installationId)]
     ]
 
     // When --phase is given, only run setup (phase 0) + the requested phase(s).
