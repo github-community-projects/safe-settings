@@ -3540,6 +3540,47 @@ async function phase19BypassActorConvergence () {
   }
 }
 
+async function phase23ConfigLoading () {
+  logPhase('Phase 23: Config loading')
+  const ConfigManager = require('./lib/configManager')
+  const env = require('./lib/env')
+  const branch = 'smoke-test-phase23'
+  const filePath = path.posix.join(CONFIG_PATH, env.SETTINGS_FILE_PATH)
+  const context = {
+    repo: () => ({ owner: ORG, repo: ADMIN_REPO }),
+    octokit,
+    log: { error: log, debug: log, info: log }
+  }
+  const manager = new ConfigManager(context, branch)
+  let created = false
+  try {
+    // Creating rather than replacing the ref protects any pre-existing branch.
+    await createBranch(ORG, ADMIN_REPO, branch)
+    created = true
+    await createOrUpdateFile(ORG, ADMIN_REPO, filePath, 'repository:\n  has_wiki: false\n', branch, '23: config loading fixture')
+    assert(JSON.stringify(await manager.loadGlobalSettingsYaml()) === JSON.stringify({ repository: { has_wiki: false } }),
+      '23: real global config is parsed from the requested branch')
+    await createOrUpdateFile(ORG, ADMIN_REPO, filePath, '# empty\n', branch, '23: empty config fixture')
+    assert(JSON.stringify(await manager.loadGlobalSettingsYaml()) === '{}', '23: empty YAML returns an empty object')
+    assert(await manager.loadYaml(CONFIG_PATH) === null, '23: real directory response returns null')
+    assert(await manager.loadYaml(path.posix.join(CONFIG_PATH, 'smoke-missing-config-23.yml')) === null,
+      '23: missing config file returns null on real HTTP 404')
+    assert(await new ConfigManager(context, `${branch}-missing`).loadGlobalSettingsYaml() === null,
+      '23: missing ref returns null on real HTTP 404')
+  } catch (error) {
+    logFail(`23: config loading failed: ${error.message}`)
+    throw error
+  } finally {
+    if (created) {
+      try {
+        await deleteBranch(ORG, ADMIN_REPO, branch)
+      } catch (error) {
+        logFail(`23: could not remove fixture branch: ${error.message}`)
+      }
+    }
+  }
+}
+
 async function phase24OrganizationSyncTargeting () {
   logPhase('Phase 24: Organization-targeted full-sync dry run')
   if (!assert(process.env.GH_ORG && orgInstallation?.account?.login?.toLowerCase() === ORG.toLowerCase(),
@@ -3735,6 +3776,7 @@ async function main () {
       ['Phase 20: Custom property exclusions', phase20CustomPropertyExclusions],
       ['Phase 21: Variable pagination', phase21VariablePagination],
       ['Phase 22: Test-org installation full-sync NOP', () => phase22InstallationFullSync(app, installationId)],
+      ['Phase 23: Config loading', phase23ConfigLoading],
       ['Phase 24: Organization sync targeting', phase24OrganizationSyncTargeting]
     ]
 

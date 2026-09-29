@@ -1091,8 +1091,16 @@ The smoke test runs the following phases:
 | **Phase 19** | Tests ignored `OrganizationAdmin`/`DeployKey` IDs, order-independent NOP convergence, real bypass-mode/role-ID changes, and no redundant updates (requires Phase 1) |
 | **Phase 21** | Reads all pages of 101 repository variables and 100 environment variables, verifies unchanged NOP/apply writes nothing, and updates only the two boundary variables (requires Phases 1 and 13) |
 | **Phase 22** | Runs real full-sync NOP against the verified `GH_ORG` installation with controlled enumeration/auth and read-only, org-scoped requests. Requires only Setup; multi-installation fanout and failure isolation are covered by unit/CLI tests, not this single-org smoke |
+| **Phase 23** | Tests real config loading, empty YAML, directories, and missing-file/ref HTTP 404s on an owned temporary branch (requires only Setup) |
 | **Phase 24** | Runs the real full-sync CLI with explicit `GH_ORG` and `FULL_SYNC_NOP=true`, verifying the selected installation and successful completion; multi-account, no-match, and cron failure scenarios use local mocked tests |
 | **Teardown** | Shuts down safe-settings, deletes test repos, teams, custom roles, and rulesets |
+
+Run config-loading and existing config-validation coverage with
+`node smoke-test.js --phase 10,23` (Setup and Teardown run automatically).
+Phase 23 removes its temporary `smoke-test-phase23` branch even on failure.
+HTTP 403/500 and network failures are injected only in local unit tests, which
+also verify original-error identity and full-sync/NOP reporting; the live smoke
+does not change permissions or provoke rate limits.
 
 The harness rejects a nonempty `CRON` before authentication or setup. However,
 the spawned Probot CLI reloads `.env` and can override explicit environment values.
