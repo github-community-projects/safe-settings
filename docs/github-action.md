@@ -22,6 +22,12 @@ for suborg configuration changes; existing repository restrictions still apply.
 ### Example GHA Workflow
 The below example uses the GHA "cron" feature to run a full-sync every 4 hours. While not required, this example uses the `.github` repo as the `admin` repo (set via `ADMIN_REPO` env var) and the safe-settings configurations are stored in the `safe-settings/` directory (set via `CONFIG_PATH` and `DEPLOYMENT_CONFIG_FILE`).
 
+`GH_ORG` selects the account to sync, matching its login case-insensitively.
+Set it when the App is installed on multiple accounts; without it, full sync
+uses the first installation returned by the API. If no installation matches,
+the sync exits nonzero rather than syncing another account, including in dry
+runs (`FULL_SYNC_NOP=true`).
+
 ```yaml
 name: Safe Settings Sync
 on:

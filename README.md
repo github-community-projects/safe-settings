@@ -951,6 +951,21 @@ You can pass environment variables; the easiest way to do it is via a `.env` fil
   ```
   CREATE_DEFAULT_BRANCH=true
   ```
+1. Scope CLI and cron full syncs to one account using `GH_ORG`. For e.g.
+  ```
+  GH_ORG=my-org
+  ```
+  A full sync (`CRON` or `npm run full-sync`) selects the installation whose
+  account login matches `GH_ORG` case-insensitively and reads configuration from
+  that account's `<ADMIN_REPO>`. If no installation matches, including when the
+  app has no installations, the sync fails instead of syncing another account.
+  This also applies to dry runs (`FULL_SYNC_NOP=true`); the CLI exits nonzero on
+  a targeting error, and cron reports the execution as failed.
+  When `GH_ORG` is unset, the first installation returned by the API is used,
+  so set it whenever the app is installed on more than one account.
+  Webhook events still use their own installation context. `GH_ORG` is also used
+  by the [manifest flow](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest)
+  to choose where the app is registered.
 
 
 ### Runtime Settings
@@ -1037,6 +1052,9 @@ node smoke-test.js --phase 1,3,5
 # Bypass actor apply/NOP convergence (Phase 1 creates the required test repo)
 node smoke-test.js --phase 1,19
 
+# Explicit GH_ORG full-sync CLI dry run (setup + Phase 24 + teardown)
+node smoke-test.js --phase 24
+
 # Mix range + interactive
 npm run smoke-test:phase -- 1-3 interactive
 node smoke-test.js --phase 1-3 --interactive
@@ -1063,6 +1081,7 @@ The smoke test runs the following phases:
 | **Phase 12** | Tests `custom_properties` plugin |
 | **Phase 13** | Tests the `variables` plugin (create, update, remove variables) |
 | **Phase 19** | Tests ignored `OrganizationAdmin`/`DeployKey` IDs, order-independent NOP convergence, real bypass-mode/role-ID changes, and no redundant updates (requires Phase 1) |
+| **Phase 24** | Runs the real full-sync CLI with explicit `GH_ORG` and `FULL_SYNC_NOP=true`, verifying the selected installation and successful completion; multi-account, no-match, and cron failure scenarios use local mocked tests |
 | **Teardown** | Shuts down safe-settings, deletes test repos, teams, custom roles, and rulesets |
 
 ### Output

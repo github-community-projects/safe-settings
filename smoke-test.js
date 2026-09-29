@@ -148,6 +148,7 @@ class InteractiveExit extends Error {
 // ─── Octokit client (initialized in main) ────────────────────────────────────
 
 let octokit = null
+let orgInstallation = null
 // Enterprise-installation-authenticated client (Phase 17). Null when the app
 // is not installed on the enterprise or GH_ENTERPRISE is unset.
 let entOctokit = null
@@ -3447,6 +3448,47 @@ async function phase19BypassActorConvergence () {
   }
 }
 
+async function phase24OrganizationSyncTargeting () {
+  logPhase('Phase 24: Organization-targeted full-sync dry run')
+  if (!assert(process.env.GH_ORG && orgInstallation?.account?.login?.toLowerCase() === ORG.toLowerCase(),
+    '24: explicit GH_ORG matches the authenticated test installation')) {
+    throw new Error('Phase 24 requires an explicitly configured and verified test organization')
+  }
+
+  const result = await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [path.join(__dirname, 'full-sync.js')], {
+      cwd: __dirname,
+      env: {
+        ...process.env,
+        GH_ORG: ORG,
+        FULL_SYNC_NOP: 'true',
+        CRON: '',
+        LOG_LEVEL: 'info'
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 120000
+    })
+    let output = ''
+    child.stdout.on('data', data => { output += data })
+    child.stderr.on('data', data => { output += data })
+    child.on('error', error => {
+      logFail(`24: could not start full-sync CLI: ${error.message}`)
+      reject(error)
+    })
+    child.on('close', (code, signal) => resolve({ code, signal, output }))
+  })
+
+  const selected = [...result.output.matchAll(/Syncing installation (\d+) on account ([A-Za-z0-9-]+)/g)]
+  assert(result.code === 0, `24: full-sync CLI exited successfully (code=${result.code}, signal=${result.signal})`)
+  assert(result.output.includes('Starting full sync with NOP=true'), '24: full-sync CLI ran in NOP mode')
+  assert(selected.length === 1 && Number(selected[0][1]) === orgInstallation.id &&
+    selected[0][2].toLowerCase() === ORG.toLowerCase(),
+  '24: sync selected exactly the authenticated test organization installation')
+  assert(result.output.includes('Full sync completed successfully.'), '24: actual full-sync entrypoint completed')
+  assert(!/Unexpected error during full sync|Fatal error during full sync|Errors occurred during full sync/.test(result.output),
+    '24: full-sync CLI reported no failure')
+}
+
 async function main () {
   const { App } = await import('octokit')
   const app = new App({ appId: APP_ID, privateKey: PRIVATE_KEY })
@@ -3457,6 +3499,7 @@ async function main () {
     // Org/user installations key off account.login (only enterprise accounts have a slug).
     if (installation.account && installation.account.login && installation.account.login.toLowerCase() === ORG.toLowerCase()) {
       installationId = installation.id
+      orgInstallation = installation
       break
     }
   }
@@ -3517,7 +3560,8 @@ async function main () {
       ['Phase 17: App installation management', phase17AppInstallations],
       ['Phase 18: Team include/exclude filters', phase18TeamIncludeExclude],
       ['Phase 19: Bypass actor convergence', phase19BypassActorConvergence],
-      ['Phase 20: Custom property exclusions', phase20CustomPropertyExclusions]
+      ['Phase 20: Custom property exclusions', phase20CustomPropertyExclusions],
+      ['Phase 24: Organization sync targeting', phase24OrganizationSyncTargeting]
     ]
 
     // When --phase is given, only run setup (phase 0) + the requested phase(s).

@@ -418,8 +418,17 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     robot.log.trace('Fetching installations')
     const installations = await listAllInstallations()
 
-    if (installations.length > 0) {
-      const installation = installations[0]
+    const installation = env.GH_ORG
+      ? installations.find(i => i.account?.login?.toLowerCase() === env.GH_ORG.toLowerCase())
+      : installations[0]
+
+    if (env.GH_ORG && !installation) {
+      const accounts = installations.map(i => i.account?.login).join(', ')
+      throw new Error(`No app installation found for GH_ORG '${env.GH_ORG}'. Installed on: [${accounts}]`)
+    }
+
+    if (installation) {
+      robot.log.info(`Syncing installation ${installation.id} on account ${installation.account?.login}`)
       const github = await robot.auth(installation.id)
       const context = {
         payload: {
@@ -1017,7 +1026,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     */
     cron.schedule(process.env.CRON, () => {
       robot.log.debug('running a task every minute')
-      syncInstallation()
+      return syncInstallation()
     })
   }
 
