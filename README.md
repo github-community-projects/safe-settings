@@ -363,6 +363,12 @@ Notes:
 > ⚠️ **Warning:**
 When `{{EXTERNALLY_DEFINED}}` is removed from an existing branch protection rule or ruleset configuration, the status checks in the existing rules in GitHub will revert to the checks that are defined in safe-settings. From this point onwards, all status checks configured through the GitHub UI will be reverted back to the safe-settings configuration.
 
+Entries in the organization-level `centralized_ruleset_bypass_actors` replace
+matching actors in individual rulesets. For `OrganizationAdmin` and `DeployKey`,
+identity is the actor type alone: GitHub ignores `actor_id`, so omitted, null,
+and concrete IDs all refer to the same actor. The centralized entry's
+`bypass_mode` takes precedence without adding a duplicate actor.
+
 #### Referencing ruleset bypass actors and reviewers by name
 
 Rulesets normally require numeric ids for `bypass_actors[].actor_id` and for the
