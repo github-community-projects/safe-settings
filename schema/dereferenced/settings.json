@@ -2026,20 +2026,113 @@
       }
     },
     "custom_properties": {
-      "description": "Custom properties",
-      "type": "array",
-      "items": {
-        "description": "A custom property entry",
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "value": {
-            "type": "string"
+      "description": "Custom properties to enforce; exclude patterns preserve undeclared values.",
+      "oneOf": [
+        {
+          "type": "array",
+          "items": {
+            "description": "A custom property entry",
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "property_name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "value": {
+                "type": [
+                  "string",
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "anyOf": [
+            {
+              "required": [
+                "include"
+              ]
+            },
+            {
+              "required": [
+                "exclude"
+              ]
+            }
+          ],
+          "properties": {
+            "include": {
+              "type": "array",
+              "items": {
+                "description": "A custom property entry",
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "property_name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "value": {
+                    "type": [
+                      "string",
+                      "array",
+                      "null"
+                    ],
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "anyOf": [
+                  {
+                    "required": [
+                      "name"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "property_name"
+                    ]
+                  }
+                ]
+              }
+            },
+            "exclude": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Case-insensitive JavaScript regular expression, not a glob."
+                  }
+                }
+              }
+            }
           }
         }
-      }
+      ]
     },
     "variables": {
       "description": "Repository or org-level Actions variables",
@@ -4063,10 +4156,22 @@
       "type": "object",
       "properties": {
         "name": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
+        },
+        "property_name": {
+          "type": "string",
+          "minLength": 1
         },
         "value": {
-          "type": "string"
+          "type": [
+            "string",
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
         }
       }
     },

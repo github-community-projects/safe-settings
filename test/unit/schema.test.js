@@ -136,6 +136,24 @@ describe.each(files)('%s schema', file => {
     expect(validate({ teams: [{ name: 'maintainers', include: 'service-*' }] })).toBe(false)
     expect(validate({ collaborators: [{ username: 'octocat', exclude: 'archived-*' }] })).toBe(false)
   })
+
+  it.each([
+    [], [{ name: 'team' }], [{ name: 'team', value: 'api' }], [{ property_name: 'team', value: ['api', 'worker'] }],
+    { include: [{ name: 'owner', value: null }] }, { exclude: [{ name: '^OWNER-\\D+$' }] },
+    { include: [], exclude: [] }, { include: [{ name: 'owner', value: 'api' }], exclude: [{ name: '.*' }] }
+  ].map(config => [config]))('accepts custom property configuration %j', customProperties => {
+    expect(validate({ custom_properties: customProperties })).toBe(true)
+  })
+
+  it.each([
+    {}, { bogus: [] }, { include: null }, { exclude: null }, { include: [], exclude: '*' },
+    { include: [], typo: [] }, { exclude: [null] }, { exclude: [{}] }, { exclude: [{ name: 1 }] },
+    { exclude: [{ name: '' }] }, { exclude: [{ name: '.*', typo: true }] }, { include: ['bad'] },
+    { include: [{ name: 'bad' }] }, { include: [{ value: 'bad' }] }, { include: [{ name: 'bad', value: [1] }] },
+    { include: [{ name: 'bad', value: {} }] }
+  ].map(config => [config]))('rejects malformed custom property configuration %j', customProperties => {
+    expect(validate({ custom_properties: customProperties })).toBe(false)
+  })
 })
 
 describe('ruleset scope validation', () => {
