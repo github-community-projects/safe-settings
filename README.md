@@ -1037,6 +1037,9 @@ node smoke-test.js --phase 1,3,5
 # Bypass actor apply/NOP convergence (Phase 1 creates the required test repo)
 node smoke-test.js --phase 1,19
 
+# Repository and environment variables, including pagination and no-op convergence
+node smoke-test.js --phase 1,13,21
+
 # Mix range + interactive
 npm run smoke-test:phase -- 1-3 interactive
 node smoke-test.js --phase 1-3 --interactive
@@ -1063,7 +1066,15 @@ The smoke test runs the following phases:
 | **Phase 12** | Tests `custom_properties` plugin |
 | **Phase 13** | Tests the `variables` plugin (create, update, remove variables) |
 | **Phase 19** | Tests ignored `OrganizationAdmin`/`DeployKey` IDs, order-independent NOP convergence, real bypass-mode/role-ID changes, and no redundant updates (requires Phase 1) |
+| **Phase 21** | Reads all pages of 101 repository variables and 100 environment variables, verifies unchanged NOP/apply writes nothing, and updates only the two boundary variables (requires Phases 1 and 13) |
 | **Teardown** | Shuts down safe-settings, deletes test repos, teams, custom roles, and rulesets |
+
+GitHub [limits each environment to 100 variables](https://docs.github.com/en/actions/reference/workflows-and-actions/variables#limits-for-configuration-variables),
+so Phase 21 stays within that live limit. The phase records actual API next links
+and page sizes: GitHub can return fewer than the requested 100 items per page.
+Run `npm run test:pagination` on Node 22+ for real installed-Octokit loopback
+coverage of 101 repository and environment variables, server-capped and cursor
+pagination, empty pages, and API failures without live credentials.
 
 ### Output
 
