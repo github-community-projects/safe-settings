@@ -327,7 +327,7 @@ describe('Repository sync batching', () => {
         require: name => {
           if (name === './') return () => ({ syncInstallation: async () => settings })
           if (name === './lib/env') return { FULL_SYNC_NOP: true }
-          if (name === 'probot') return { createProbot: () => ({ log: console }) }
+          if (name === 'probot') return { createProbot: () => ({ ready: async () => ({ log: console }) }) }
           throw new Error('Unexpected dependency: ' + name)
         },
         process,

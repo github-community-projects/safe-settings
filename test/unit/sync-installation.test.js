@@ -232,7 +232,7 @@ describe('syncInstallation', () => {
           getAuthenticated: async () => ({ data: { slug: 'safe-settings' } })
         } }
       }
-      const robot = { auth: async () => github, on: () => {}, log: console }
+      const robot = { auth: async () => github, on: () => {}, log: console, ready: async () => robot }
       vm.runInNewContext(fs.readFileSync(process.argv[2], 'utf8'), {
         require: name => {
           if (name === './') return (robot, options) => plugin(robot, options, {
