@@ -3655,6 +3655,117 @@ async function phase25ArchivedRepositories () {
   }
 }
 
+async function phase26TeamSlugComparison () {
+  logPhase('Phase 26: Team slug comparisons')
+  const Teams = require('./lib/plugins/teams')
+  const { isDeepStrictEqual } = require('node:util')
+  const target = { owner: ORG, repo: 'smoke-team-slug' }
+  const teamName = 'Smoke Team Slug 26'
+  const teamSlug = 'smoke-team-slug-26'
+  const permissionPath = `/orgs/${ORG}/teams/${teamSlug}/repos/${ORG}/${target.repo}`
+  const errors = []
+  const writes = []
+  const pluginLog = { debug () {}, info: log, error: log, warn: log }
+  const plugin = (nop, permission = 'pull') => new Teams(nop, octokit, target, [{ name: teamSlug, permission }], pluginLog, errors)
+  const requireAssertion = (condition, message) => {
+    if (!assert(condition, `26: ${message}`)) throw new Error(`Phase 26: ${message}`)
+  }
+  const requireAbsent = async (lookup, name) => {
+    try {
+      await lookup()
+    } catch (error) {
+      if (error.status === 404) return
+      throw error
+    }
+    throw new Error(`Phase 26 refuses to overwrite existing fixture ${name}`)
+  }
+  await requireAbsent(() => octokit.rest.repos.get(target), target.repo)
+  await requireAbsent(() => octokit.rest.teams.getByName({ org: ORG, team_slug: teamSlug }), teamSlug)
+
+  let createdRepo = false
+  let createdTeam
+  let cleanupErrors = []
+  const observe = async (request, options) => {
+    if (options.method !== 'GET') {
+      const endpoint = octokit.request.endpoint(options)
+      writes.push({ method: endpoint.method, path: new URL(endpoint.url).pathname, body: endpoint.body })
+    }
+    return request(options)
+  }
+  try {
+    await octokit.rest.repos.createInOrg({ org: ORG, name: target.repo, private: true })
+    createdRepo = true
+    const { data: team } = await octokit.rest.teams.create({ org: ORG, name: teamName, privacy: 'closed' })
+    createdTeam = team
+    requireAssertion(team.name === teamName && team.slug === teamSlug && team.name !== team.slug,
+      'owned team has a real display-name/slug mismatch')
+
+    const listTeams = () => octokit.paginate(octokit.rest.repos.listTeams, target)
+    const teamState = records => records.map(({ id, name, slug, permission }) => ({ id, name, slug, permission }))
+      .sort((a, b) => a.id - b.id)
+    const inheritedState = teamState(await listTeams())
+    log(`26: inherited repository teams before assignment: ${JSON.stringify(inheritedState)}`)
+    requireAssertion((await plugin(true).find()).length === 0,
+      'new repository has no pre-existing managed teams; inherited security managers remain unmanaged')
+    const matchesExpectedTeams = (records, permission) => isDeepStrictEqual(teamState(records), teamState([
+      ...inheritedState, { id: team.id, name: teamName, slug: teamSlug, permission }
+    ]))
+    await plugin(false).sync()
+    let listed = await listTeams()
+    log(`26: repository teams after assignment: ${JSON.stringify(teamState(listed))}`)
+    requireAssertion(matchesExpectedTeams(listed, 'pull'),
+      'real apply adds only the owned team with pull permission and preserves inherited teams')
+    requireAssertion(errors.length === 0, 'initial assignment has no plugin errors')
+
+    octokit.hook.wrap('request', observe)
+    for (const nop of [true, false]) {
+      const instance = plugin(nop)
+      requireAssertion(await instance.sync() === undefined, `unchanged ${nop ? 'NOP' : 'apply'} emits no result`)
+      requireAssertion(instance.hasChanges === false, `unchanged ${nop ? 'NOP' : 'apply'} does not signal changes`)
+      requireAssertion(writes.length === 0, `unchanged ${nop ? 'NOP' : 'apply'} makes no writes`)
+    }
+
+    const changed = plugin(true, 'push')
+    const commands = (await changed.sync())?.flat(Infinity) || []
+    requireAssertion(commands.length === 2, 'changed NOP returns exactly a summary and one proposed action')
+    requireAssertion(isDeepStrictEqual(commands[0].action, {
+      msg: 'Changes found',
+      additions: [],
+      modifications: [{ permission: 'push', name: teamSlug }],
+      deletions: []
+    }), 'changed NOP reports exactly one permission MODIFY without additions or deletions')
+    requireAssertion(new URL(commands[1].endpoint).pathname === permissionPath &&
+      commands[1].body.permission === 'push', 'proposed action uses the actual team slug and push permission')
+    requireAssertion(changed.hasChanges === true && writes.length === 0, 'changed NOP signals changes without writing')
+    listed = await listTeams()
+    requireAssertion(matchesExpectedTeams(listed, 'pull'), 'NOP leaves all live team identities and permissions unchanged')
+
+    await plugin(false, 'push').sync()
+    requireAssertion(writes.length === 1 && writes[0].method === 'PUT' &&
+      writes[0].path === permissionPath && writes[0].body.permission === 'push',
+    'real permission change performs exactly one slug-targeted PUT')
+    listed = await listTeams()
+    requireAssertion(matchesExpectedTeams(listed, 'push'),
+      'real permission change preserves inherited teams and owned identity while converging to push')
+    const converged = plugin(true, 'push')
+    requireAssertion(await converged.sync() === undefined && converged.hasChanges === false,
+      'converged NOP has no changes')
+    requireAssertion(writes.length === 1 && errors.length === 0, 'no extra writes or plugin errors')
+  } finally {
+    octokit.hook.remove('request', observe)
+    const cleanup = await Promise.allSettled([
+      ...(createdRepo ? [octokit.rest.repos.delete(target)] : []),
+      ...(createdTeam ? [octokit.rest.teams.deleteInOrg({ org: ORG, team_slug: createdTeam.slug })] : [])
+    ])
+    for (const result of cleanup) {
+      if (result.status === 'rejected') logFail(`26: fixture cleanup failed: ${result.reason.message}`)
+    }
+    cleanupErrors = cleanup.filter(result => result.status === 'rejected').map(result => result.reason)
+  }
+  if (cleanupErrors.length) throw new AggregateError(cleanupErrors, 'Phase 26 cleanup failed')
+  log('Phase 26 complete')
+}
+
 async function phase23ConfigLoading () {
   logPhase('Phase 23: Config loading')
   const ConfigManager = require('./lib/configManager')
@@ -3893,7 +4004,8 @@ async function main () {
       ['Phase 22: Test-org installation full-sync NOP', () => phase22InstallationFullSync(app, installationId)],
       ['Phase 23: Config loading', phase23ConfigLoading],
       ['Phase 24: Organization sync targeting', phase24OrganizationSyncTargeting],
-      ['Phase 25: Archived repositories', phase25ArchivedRepositories]
+      ['Phase 25: Archived repositories', phase25ArchivedRepositories],
+      ['Phase 26: Team slug comparisons', phase26TeamSlugComparison]
     ]
 
     // When --phase is given, only run setup (phase 0) + the requested phase(s).
