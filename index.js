@@ -496,7 +496,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     const { repository } = payload
 
     const adminRepo = repository.name === env.ADMIN_REPO
-    const hubMasterRepo = repository.name === env.SAFE_SETTINGS_HUB_REPO
+    const hubMasterRepo = repository.name === env.SAFE_SETTINGS_HUB_REPO && repository.owner.login === env.SAFE_SETTINGS_HUB_ORG
     if (!adminRepo && !hubMasterRepo) {
       return
     }
@@ -745,7 +745,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     const { payload } = context
     const { repository } = payload
     const adminRepo = repository.name === env.ADMIN_REPO
-    const hubMasterRepo = repository.name === env.SAFE_SETTINGS_HUB_REPO
+    const hubMasterRepo = repository.name === env.SAFE_SETTINGS_HUB_REPO && repository.owner.login === env.SAFE_SETTINGS_HUB_ORG
     robot.log.debug(`Is Admin repo event ${adminRepo}, Is Hub-sync master repo ${hubMasterRepo}`)
     if (!adminRepo && !hubMasterRepo) {
       robot.log.debug('Not working on the Admin repo or Hub-sync master repo, returning...')
@@ -817,6 +817,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
    * @param {Object} context - The context object provided by Probot
    */
   robot.on('pull_request.closed', async context => {
+    if (!context.payload.pull_request?.merged) return null
     try {
       await hubSyncHandler(robot, context)
     } catch (err) {
@@ -854,7 +855,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     }
 
     const adminRepo = repository.name === env.ADMIN_REPO
-    const hubMasterRepo = repository.name === env.SAFE_SETTINGS_HUB_REPO
+    const hubMasterRepo = repository.name === env.SAFE_SETTINGS_HUB_REPO && repository.owner.login === env.SAFE_SETTINGS_HUB_ORG
     robot.log.debug(`Is Admin repo event ${adminRepo}, Is Hub-sync master repo ${hubMasterRepo}`)
     if (!adminRepo && !hubMasterRepo) {
       robot.log.debug('Not working on the Admin repo or Hub-sync master repo, returning...')

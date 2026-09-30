@@ -140,9 +140,9 @@ body.dark-theme .nav-link.menu-hover:hover {
   box-shadow: none !important;
 }
 
-.nav-tabs .nav-link:focus {
-  border: none !important;
-  outline: none !important;
+.nav-tabs .nav-link:focus-visible {
+  outline: 2px solid currentColor !important;
+  outline-offset: 2px;
   box-shadow: none !important;
 }
 

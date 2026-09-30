@@ -172,7 +172,7 @@ rules:
 
 ---
 
-**Status**: Proposed  
+**Status**: ✅ Implemented  
 **Date**: 2026-07-07  
 **Author**: Safe-Settings Team  
 **Decision**: Manifest-based hub-sync control with include/exclude rules for organizations and files

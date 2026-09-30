@@ -306,7 +306,7 @@ The following table summarizes the Safe Settings API endpoints:
 | `/api/safe-settings/hub/content`         | GET    | List hub repo files/directories                      | List hub files |
 | `/api/safe-settings/hub/content/*`       | GET    | Fetch specific file or directory from hub repo        | Get file content |
 | `/api/safe-settings/hub/import`          | POST   | Import settings from orgs into the hub                | Import org settings |
-| `/api/safe-settings/env`                 | GET    | App environment/config variables                      | Get env vars |
+| `/api/safe-settings/app/env`             | GET    | App environment/config variables                      | Get env vars |
 
 **Examples:**
 - Fetch org installation status:

@@ -11,9 +11,9 @@ const normalizePrefix = (prefix) => {
 
 // Next.js automatically handles basePath for routing and asset loading
 // We expose this for manual link construction (URL prefix in browser)
-export const BASE_PATH = typeof window !== 'undefined' 
-  ? (window.__NEXT_DATA__?.basePath || '/safe-settings')
-  : normalizePrefix(process.env.NEXT_PUBLIC_SAFE_SETTINGS_HUB_URL_PREFIX || process.env.SAFE_SETTINGS_HUB_URL_PREFIX || '/safe-settings');
+export const BASE_PATH = typeof window !== 'undefined'
+  ? normalizePrefix(window.__NEXT_DATA__?.basePath ?? '/safe-settings')
+  : normalizePrefix(process.env.NEXT_PUBLIC_SAFE_SETTINGS_HUB_URL_PREFIX ?? process.env.SAFE_SETTINGS_HUB_URL_PREFIX ?? '/safe-settings');
 
 /**
  * Prepend base path to a URL

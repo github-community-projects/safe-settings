@@ -3,7 +3,10 @@ import { useEffect, useRef } from "react";
 import useSWR from "swr";
 import { withBasePath } from "../utils/basePath";
 
-const fetcher = (...args) => fetch(...args).then(res => res.json());
+const fetcher = (...args) => fetch(...args).then(res => {
+  if (!res.ok) throw new Error(`Request failed (HTTP ${res.status})`);
+  return res.json();
+});
 
 export default function HubOrgGraph({ width = 640, height = 320 }) {
   const vizRef = useRef(null);

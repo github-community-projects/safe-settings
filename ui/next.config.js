@@ -5,7 +5,7 @@ const normalizePrefix = (prefix) => {
   return prefix.startsWith('/') ? prefix : `/${prefix}`;
 };
 
-const basePath = normalizePrefix(process.env.SAFE_SETTINGS_HUB_URL_PREFIX || '/safe-settings');
+const basePath = normalizePrefix(process.env.SAFE_SETTINGS_HUB_URL_PREFIX === undefined ? '/safe-settings' : process.env.SAFE_SETTINGS_HUB_URL_PREFIX);
 
 const nextConfig = {
   output: "export",
@@ -14,14 +14,6 @@ const nextConfig = {
   eslint: {
     ignoreDuringBuilds: true,
   },
-  async redirects() {
-    return [
-      {
-        source: '/',
-        destination: '/dashboard',
-        permanent: false,
-      },
-    ];
   },
 };
 
