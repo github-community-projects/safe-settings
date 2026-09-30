@@ -219,4 +219,180 @@ describe('Settings result deduplication', () => {
     expect(context.octokit.rest.checks.update).not.toHaveBeenCalled()
     expect(context.octokit.rest.issues.createComment).not.toHaveBeenCalled()
   })
+
+  describe('opt-in PR comment summary', () => {
+    const limit = 55536
+    const footer = '\n\n- [ ] I have reviewed the changes and verified that they are intended.'
+    const checkUrl = 'https://github.com/test/admin/runs/42'
+    const originalFlag = env.PR_COMMENT_SUMMARY_ENABLED
+    const bodies = () => context.octokit.rest.issues.createComment.mock.calls.map(([params]) => params.body)
+    const header = (considered, affected, page = '') =>
+      `#### :robot: Safe-Settings config changes detected${page}:\n\n**Repos considered:** ${considered}\n**Repos affected:** ${affected}\n\n`
+    const summary = (errors, plugins) =>
+      `**Errors:** ${errors} · **Plugins affected:** ${plugins}\n\nView the full per-repo breakdown: ${checkUrl}\n\n`
+    const change = (plugin, name, value = true) => ({
+      type: 'INFO',
+      plugin,
+      repo: name,
+      action: { additions: {}, deletions: {}, modifications: { description: value } }
+    })
+    const message = (type, msg) => ({
+      type,
+      plugin: 'Repository',
+      repo: 'test-repo',
+      action: { msg, additions: null, deletions: null, modifications: null }
+    })
+
+    beforeEach(() => {
+      env.PR_COMMENT_SUMMARY_ENABLED = 'true'
+      context.payload.check_run.html_url = checkUrl
+    })
+
+    afterEach(() => {
+      if (originalFlag === undefined) delete env.PR_COMMENT_SUMMARY_ENABLED
+      else env.PR_COMMENT_SUMMARY_ENABLED = originalFlag
+    })
+
+    it.each([undefined, 'false', 'TRUE'])('preserves the exact default no-op comment for flag=%s', async flag => {
+      env.PR_COMMENT_SUMMARY_ENABLED = flag
+      await settings.handleResults()
+      expect(bodies()).toEqual([`${header(0, 0)}_No changes to apply._\n\n### Errors\n\`None\``])
+    })
+
+    it('adds only opt-in metadata and an unchecked footer to no-op output', async () => {
+      await settings.handleResults()
+      expect(bodies()).toEqual([
+        `${header(0, 0)}${summary(0, 'None')}_No changes to apply._\n\n### Errors\n\`None\`${footer}`
+      ])
+      expect(context.octokit.rest.checks.update).toHaveBeenCalledWith(expect.objectContaining({
+        conclusion: 'success'
+      }))
+    })
+
+    it('counts distinct errors, rendered plugins and repositories across the operation without losing messages', async () => {
+      const error = message('ERROR', 'first failure')
+      settings.results = [
+        change('Repository', 'test-repo'),
+        change('Branches', 'test-repo'),
+        change('Repository', 'second-repo'),
+        change('Labels', 'unchanged-repo', {}),
+        error, structuredClone(error), message('ERROR', 'second failure'),
+        message('WARNING', 'needs attention'), message('INFO', 'intentionally skipped')
+      ]
+      env.PR_COMMENT_SUMMARY_ENABLED = 'false'
+      await settings.handleResults()
+      const defaultBody = bodies()[0]
+      expect(defaultBody.startsWith(header(3, 2))).toBe(true)
+      const defaultCheck = context.octokit.rest.checks.update.mock.calls[0][0]
+      context.octokit.rest.issues.createComment.mockClear()
+      env.PR_COMMENT_SUMMARY_ENABLED = 'true'
+      await settings.handleResults()
+      expect(bodies()).toEqual([
+        defaultBody.replace(header(3, 2), header(3, 2) + summary(2, 'Repository, Branches')) + footer
+      ])
+      for (const text of ['first failure', 'second failure', 'needs attention', 'intentionally skipped']) {
+        expect(bodies()[0].split(text)).toHaveLength(2)
+      }
+      const check = context.octokit.rest.checks.update.mock.calls[1][0]
+      expect(check.conclusion).toBe('failure')
+      expect(check.output.summary.replace(/Run on: `[^`]+`/, '')).toBe(defaultCheck.output.summary.replace(/Run on: `[^`]+`/, ''))
+      expect(check.output.summary).not.toContain(footer)
+    })
+
+    it('does not count GitHub App subjects as affected repositories', async () => {
+      settings.results = ['first-app', 'second-app'].map(subject => ({
+        type: 'INFO',
+        plugin: 'app_installations',
+        repo: 'test (org)',
+        subject,
+        subjectType: 'app',
+        action: { additions: ['test-repo'], deletions: [], modifications: [] }
+      }))
+      await settings.handleResults()
+      expect(bodies()[0].startsWith(header(1, 0) + summary(0, 'app_installations'))).toBe(true)
+      expect(bodies()[0]).toContain('app_installations — 2 apps, 2 settings changed')
+      expect(bodies()[0]).toContain('**first-app**')
+      expect(bodies()[0]).toContain('**second-app**')
+      expect(context.octokit.rest.checks.update.mock.calls[0][0].output.summary).toContain('Number of repos affected: `0`')
+    })
+
+    it.each([undefined, '', 'undefined', 'not a URL', 'javascript:alert(1)'])('omits the link for an absent or invalid check URL %s', async htmlUrl => {
+      context.payload.check_run.html_url = htmlUrl
+      await settings.handleResults()
+      expect(bodies()).toEqual([
+        `${header(0, 0)}**Errors:** 0 · **Plugins affected:** None\n\n_No changes to apply._\n\n### Errors\n\`None\`${footer}`
+      ])
+    })
+
+    it.each(['false', 'true'])('CREATE_PR_COMMENT=false suppresses comments for summary=%s but completes the check', async flag => {
+      env.PR_COMMENT_SUMMARY_ENABLED = flag
+      jest.replaceProperty(env, 'CREATE_PR_COMMENT', 'false')
+      settings.results = [command()]
+      await settings.handleResults()
+      expect(bodies()).toEqual([])
+      expect(context.octokit.rest.checks.update).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not require webhook fields for a summary-enabled full-sync NOP', async () => {
+      delete context.payload.check_run
+      delete context.payload.repository
+      settings.results = [command()]
+      await settings.handleResults()
+      expect(bodies()).toEqual([])
+      expect(context.octokit.rest.checks.update).not.toHaveBeenCalled()
+      expect(context.log.info).toHaveBeenCalledWith(expect.stringContaining('1 planned change(s)'))
+    })
+
+    it('preserves every bounded section across pages with operation-wide counts and a footer on each', async () => {
+      const plugins = ['Repository', 'Branches', 'Labels']
+      settings.results = plugins.flatMap(plugin => Array.from({ length: 130 }, (_, i) =>
+        change(plugin, `repo-${i}`, 'x'.repeat(200))))
+      settings.results.push(message('ERROR', 'last-section error'), message('WARNING', 'last-section warning'), message('INFO', 'last-section info'))
+      await settings.handleResults()
+      const comments = bodies()
+      expect(comments.length).toBeGreaterThan(1)
+      for (const [index, body] of comments.entries()) {
+        expect(body.startsWith(header(131, 130, ` (${index + 1}/${comments.length})`) + summary(1, plugins.join(', ')))).toBe(true)
+        expect(body.endsWith(footer)).toBe(true)
+        expect(body.length).toBeLessThanOrEqual(limit)
+        expect(body).not.toContain('too many changes')
+        expect(body.match(/<details>/g)?.length || 0).toBe(body.match(/<\/details>/g)?.length || 0)
+      }
+      const combined = comments.join('\n')
+      for (const plugin of plugins) expect(combined.split(`<summary>${plugin} —`)).toHaveLength(2)
+      for (let i = 0; i < 130; i++) expect(combined.split(`**repo-${i}**`)).toHaveLength(4)
+      for (const kind of ['error', 'warning', 'info']) expect(combined.split(`last-section ${kind}`)).toHaveLength(2)
+    })
+
+    it('reserves the footer within the exact limit even when one section is truncated', async () => {
+      settings.results = Array.from({ length: 600 }, (_, i) => change('Repository', `repo-${i}`, 'x'.repeat(200)))
+      settings.results.push(message('ERROR', 'preserved trailing error'))
+      await settings.handleResults()
+      const comments = bodies()
+      expect(comments).toHaveLength(2)
+      expect(comments[0]).toHaveLength(limit)
+      expect(comments[0].endsWith(`... (too many changes to report)${footer}`)).toBe(true)
+      expect(comments[1].endsWith(`* preserved trailing error\n\n</details>${footer}`)).toBe(true)
+      for (const [index, body] of comments.entries()) {
+        expect(body.startsWith(header(601, 600, ` (${index + 1}/2)`) + summary(1, 'Repository'))).toBe(true)
+        expect(body.length).toBeLessThanOrEqual(limit)
+      }
+      expect(context.octokit.rest.checks.update.mock.calls[0][0].output.summary.length).toBeLessThanOrEqual(limit)
+    })
+
+    it.each([-1, 0, 1])('handles a single error section at the final-body limit %+d without losing the footer', async offset => {
+      settings.results = [message('ERROR', 'x')]
+      await settings.handleResults()
+      const fixedLength = bodies()[0].length - 1 - '_No changes to apply._\n\n'.length + ' (2/2)'.length
+      context.octokit.rest.issues.createComment.mockClear()
+      settings.results = [message('ERROR', 'x'.repeat(limit - fixedLength + offset))]
+      await settings.handleResults()
+      const [, body] = bodies()
+      expect(bodies()).toHaveLength(2)
+      expect(body).toHaveLength(Math.min(limit, limit + offset))
+      expect(body.endsWith(footer)).toBe(true)
+      expect(body.includes('... (too many changes to report)')).toBe(offset > 0)
+      if (offset <= 0) expect(body.endsWith(`\n\n</details>${footer}`)).toBe(true)
+    })
+  })
 })

@@ -7,6 +7,7 @@ describe('env', () => {
     SETTINGS_FILE_PATH: 'settings.yml',
     DEPLOYMENT_CONFIG_FILE_PATH: 'deployment-settings.yml',
     CREATE_PR_COMMENT: 'true',
+    PR_COMMENT_SUMMARY_ENABLED: 'false',
     FULL_SYNC_NOP: false,
     GH_ORG: undefined
   }
@@ -36,6 +37,7 @@ describe('env', () => {
       process.env.SETTINGS_FILE_PATH = 'safe-settings.yml'
       process.env.DEPLOYMENT_CONFIG_FILE = 'safe-settings-deployment.yml'
       process.env.CREATE_PR_COMMENT = 'false'
+      process.env.PR_COMMENT_SUMMARY_ENABLED = 'true'
       process.env.FULL_SYNC_NOP = 'true'
       process.env.GH_ORG = 'My-Org'
     })
@@ -52,9 +54,15 @@ describe('env', () => {
       expect(DEPLOYMENT_CONFIG_FILE_PATH).toEqual('safe-settings-deployment.yml')
       const CREATE_PR_COMMENT = envTest.CREATE_PR_COMMENT
       expect(CREATE_PR_COMMENT).toEqual('false')
+      expect(envTest.PR_COMMENT_SUMMARY_ENABLED).toEqual('true')
       const FULL_SYNC_NOP = envTest.FULL_SYNC_NOP
       expect(FULL_SYNC_NOP).toEqual(true)
       expect(envTest.GH_ORG).toEqual('My-Org')
+    })
+
+    it('preserves an explicit false summary flag', () => {
+      process.env.PR_COMMENT_SUMMARY_ENABLED = 'false'
+      expect(require('../../../lib/env').PR_COMMENT_SUMMARY_ENABLED).toEqual('false')
     })
   })
 })
