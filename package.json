@@ -24,6 +24,7 @@
     "test:pagination": "node --test test/integration/transport/variables.test.js",
     "test:archived": "node --test test/integration/transport/archived-repositories.test.js",
     "test:integration:debug": "LOG_LEVEL=debug DEBUG=nock run-s test:integration",
+    "integration:live:comment-markup": "node test/live/comment-markup.js",
     "smoke-test": "node smoke-test.js",
     "smoke-test:interactive": "node smoke-test.js --interactive",
     "smoke-test:phase": "node smoke-test.js --phase"
