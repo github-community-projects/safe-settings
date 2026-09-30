@@ -3540,6 +3540,121 @@ async function phase19BypassActorConvergence () {
   }
 }
 
+async function phase25ArchivedRepositories () {
+  logPhase('Phase 25: Archived repository request savings and unarchive')
+  const Settings = require('./lib/settings')
+  const target = { owner: ORG, repo: 'smoke-archived-repo' }
+  const targetPath = `/repos/${ORG}/${target.repo}`.toLowerCase()
+  const managedLabel = { name: 'smoke-archive-25', color: 'abcdef', description: 'Archive regression' }
+  const requireAssertion = (condition, message) => {
+    if (!assert(condition, `25: ${message}`)) throw new Error(`Phase 25: ${message}`)
+  }
+  requireAssertion(process.env.GH_ORG && orgInstallation?.target_type === 'Organization' &&
+    orgInstallation.account?.login?.toLowerCase() === ORG.toLowerCase(),
+  'explicit GH_ORG matches the authenticated test installation')
+
+  let created = false
+  const run = async (config, { nop = false, listed = true } = {}) => {
+    const requests = []
+    const listing = []
+    const errors = []
+    const logger = { debug () {}, info: log, warn: log, error: message => { errors.push(message); log(message) } }
+    const settings = new Settings(nop, {
+      payload: { installation: { id: orgInstallation.id } }, octokit, log: logger
+    }, { owner: ORG, repo: ADMIN_REPO }, {
+      ...config, restrictedRepos: { include: [target.repo] }, additive_plugins: ['labels']
+    }, 'main')
+    settings.subOrgConfigs = {}
+    settings.repoConfigs = {}
+    const observe = async (request, options) => {
+      const endpoint = octokit.request.endpoint(options)
+      const pathname = decodeURIComponent(new URL(endpoint.url).pathname).toLowerCase()
+      if (pathname === targetPath || pathname.startsWith(`${targetPath}/`)) {
+        const body = typeof endpoint.body === 'string' ? JSON.parse(endpoint.body) : endpoint.body
+        requests.push({ method: endpoint.method, path: pathname, body })
+      }
+      const response = await request(options)
+      if (pathname === '/installation/repositories') {
+        listing.push(...response.data.repositories.filter(repo => repo.name === target.repo))
+      }
+      return response
+    }
+    octokit.hook.wrap('request', observe)
+    try {
+      if (listed) await settings.eachRepositoryRepos(octokit, logger)
+      else await settings.updateRepos(target)
+    } finally {
+      octokit.hook.remove('request', observe)
+    }
+    requireAssertion(settings.errors.length === 0 && errors.length === 0, 'real Settings reported no errors')
+    if (listed) {
+      requireAssertion(listing.length === 1 && settings.processedRepoNames.has(target.repo),
+        'real installation listing reached checkAndProcessRepo for the fixture')
+    }
+    return { requests, listing, settings, writes: requests.filter(request => request.method !== 'GET') }
+  }
+
+  try {
+    // Never delete or reuse a pre-existing repository, even when run standalone.
+    try {
+      await octokit.rest.repos.get(target)
+      throw new Error(`Phase 25 refuses to overwrite ${target.repo}`)
+    } catch (error) {
+      if (error.status !== 404) throw error
+    }
+    await octokit.rest.repos.createInOrg({ org: ORG, name: target.repo, private: true, auto_init: true })
+    created = true
+    await run({ repository: { archived: true } })
+    requireAssertion((await octokit.rest.repos.get(target)).data.archived === true, 'fixture was archived by real Settings')
+
+    for (const config of [
+      { repository: { description: 'must not apply' }, labels: [managedLabel] },
+      { labels: [managedLabel] }
+    ]) {
+      for (const nop of [false, true]) {
+        const skipped = await run(config, { nop })
+        requireAssertion(skipped.listing[0].archived === true && skipped.requests.length === 0,
+          `${config.repository ? 'repository' : 'labels-only'} ${nop ? 'NOP' : 'apply'} uses listing metadata with zero fixture GETs or writes`)
+      }
+      const fallback = await run(config, { listed: false })
+      requireAssertion(fallback.requests.length === 1 && fallback.requests[0].method === 'GET' &&
+        fallback.requests[0].path === targetPath, 'unknown-state fallback only reads archive state and skips children')
+    }
+
+    const desired = { repository: { archived: false, description: 'Phase 25 unarchived' }, labels: [managedLabel] }
+    const nop = await run(desired, { nop: true })
+    requireAssertion(nop.writes.length === 0 && ['Archive', 'Repository', 'Labels'].every(
+      plugin => nop.settings.results.some(result => result.plugin === plugin)),
+    'unarchive NOP reports archive, repository and label changes without writes')
+    const applied = await run(desired)
+    requireAssertion(applied.writes[0]?.method === 'PATCH' && applied.writes[0]?.body.archived === false &&
+      applied.writes.every(request => request.body?.archived !== true), 'unarchive is the first write and listing metadata never rearchives the fixture')
+    requireAssertion(applied.writes.some(request => request.body?.description === desired.repository.description) &&
+      applied.writes.some(request => request.method === 'POST' && request.path === `${targetPath}/labels`),
+    'repository changes and a real child label write both execute after unarchiving')
+    const { data: live } = await octokit.rest.repos.get(target)
+    requireAssertion(live.archived === false && live.description === desired.repository.description, 'fixture remains unarchived with the desired repository settings')
+    const { data: label } = await octokit.rest.issues.getLabel({ ...target, name: managedLabel.name })
+    requireAssertion(label.color === managedLabel.color, 'managed label was created successfully')
+    const converged = await run(desired)
+    requireAssertion(converged.writes.length === 0, 'second apply converges without repository or child writes')
+    log('Phase 25 complete')
+  } catch (error) {
+    logFail(`25: archived repository regression failed: ${error.message}`)
+    throw error
+  } finally {
+    if (created) {
+      try {
+        await octokit.rest.repos.update({ ...target, archived: false })
+        await octokit.rest.repos.delete(target)
+        log('Phase 25 owned fixture removed')
+      } catch (error) {
+        logFail(`25: could not remove owned fixture: ${error.message}`)
+      }
+    }
+  }
+}
+
 async function phase23ConfigLoading () {
   logPhase('Phase 23: Config loading')
   const ConfigManager = require('./lib/configManager')
@@ -3777,7 +3892,8 @@ async function main () {
       ['Phase 21: Variable pagination', phase21VariablePagination],
       ['Phase 22: Test-org installation full-sync NOP', () => phase22InstallationFullSync(app, installationId)],
       ['Phase 23: Config loading', phase23ConfigLoading],
-      ['Phase 24: Organization sync targeting', phase24OrganizationSyncTargeting]
+      ['Phase 24: Organization sync targeting', phase24OrganizationSyncTargeting],
+      ['Phase 25: Archived repositories', phase25ArchivedRepositories]
     ]
 
     // When --phase is given, only run setup (phase 0) + the requested phase(s).

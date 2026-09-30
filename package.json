@@ -21,6 +21,7 @@
     "test:unit:watch": "npm run test:unit -- --watch",
     "test:integration": "jest --roots=lib --roots=test/integration",
     "test:pagination": "node --test test/transport/variables.test.cjs",
+    "test:archived": "node --test test/transport/archived-repositories.test.cjs",
     "test:integration:debug": "LOG_LEVEL=debug DEBUG=nock run-s test:integration",
     "smoke-test": "node smoke-test.js",
     "smoke-test:interactive": "node smoke-test.js --interactive",

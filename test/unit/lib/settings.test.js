@@ -1417,7 +1417,7 @@ repository:
         ])
 
         expect(updateReposSpy).toHaveBeenCalledTimes(1)
-        expect(updateReposSpy).toHaveBeenCalledWith({ owner: 'test', repo: 'new-repo' })
+        expect(updateReposSpy).toHaveBeenCalledWith({ owner: 'test', repo: 'new-repo' }, undefined)
       })
 
       it('39. plugin listed in additive_plugins has additive=true set before sync()', async () => {
@@ -1452,7 +1452,7 @@ repository:
             [LabelsCtor, [{ name: 'bug', color: 'red' }], 'labels']
           ])
           jest.spyOn(settings, 'maybeReevaluateSuborg').mockResolvedValue(undefined)
-          await settings.updateRepos({ owner: 'o', repo: 'r' })
+          await settings.updateRepos({ owner: 'o', repo: 'r' }, false)
           expect(instances.length).toBeGreaterThan(0)
           // Every labels instance must have additive=true
           instances.forEach(inst => expect(inst.additive).toBe(true))
@@ -1489,7 +1489,7 @@ repository:
             [TeamsCtor, [{ name: 'core', permission: 'push' }], 'teams']
           ])
           jest.spyOn(settings, 'maybeReevaluateSuborg').mockResolvedValue(undefined)
-          await settings.updateRepos({ owner: 'o', repo: 'r' })
+          await settings.updateRepos({ owner: 'o', repo: 'r' }, false)
           expect(instances.length).toBeGreaterThan(0)
           instances.forEach(inst => expect(inst.additive).toBe(false))
         } finally {
