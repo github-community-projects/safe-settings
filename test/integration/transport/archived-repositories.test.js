@@ -2,7 +2,7 @@ const assert = require('node:assert/strict')
 const { test } = require('node:test')
 const fs = require('node:fs')
 const vm = require('node:vm')
-const Settings = require('../../lib/settings')
+const Settings = require('../../../lib/settings')
 
 const repo = { owner: 'test-org', repo: 'archived-fixture' }
 const repoPath = `/repos/${repo.owner}/${repo.repo}`
@@ -216,7 +216,7 @@ test('repository restrictions and suborg selection still skip without any per-re
 
 test('maintained phase 25 executes its complete lifecycle against real Settings and Octokit offline', async () => {
   const f = await fixture({ smokeLifecycle: true, archived: false })
-  const source = fs.readFileSync(require.resolve('../../smoke-test'), 'utf8')
+  const source = fs.readFileSync(require.resolve('../../../smoke-test'), 'utf8')
   const phaseSource = source.slice(source.indexOf('async function phase25ArchivedRepositories ('), source.indexOf('\nasync function phase23ConfigLoading ('))
   const messages = []
   const failures = []

@@ -1,9 +1,9 @@
 const assert = require('node:assert/strict')
 const http = require('node:http')
 const { test } = require('node:test')
-const Variables = require('../../lib/plugins/variables')
-const Environments = require('../../lib/plugins/environments')
-const NopCommand = require('../../lib/nopcommand')
+const Variables = require('../../../lib/plugins/variables')
+const Environments = require('../../../lib/plugins/environments')
+const NopCommand = require('../../../lib/nopcommand')
 
 // Native Node loads the installed ESM Octokit and exercises its real fetch/paginate stack.
 for (const [kind, Plugin] of [['repository', Variables], ['environment', Environments]]) {

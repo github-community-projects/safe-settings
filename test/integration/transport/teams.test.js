@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict')
 const http = require('node:http')
 const { test } = require('node:test')
-const Teams = require('../../lib/plugins/teams')
+const Teams = require('../../../lib/plugins/teams')
 
 const repo = { owner: 'org', repo: 'repo' }
 const team = { id: 42, slug: 'platform-engineering', name: 'Platform Engineering', permission: 'pull', description: null }

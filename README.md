@@ -1130,6 +1130,13 @@ Run `npm run test:pagination` on Node 22+ for real installed-Octokit loopback
 coverage of 101 repository and environment variables, server-capped and cursor
 pagination, empty pages, and API failures without live credentials.
 
+The archived-repository, pagination, and team transport suites live under
+`test/integration/transport/` and run automatically
+with `npm run test:integration` and `npm run test:integration:ci`, including in
+Node.js CI. They use Node's native test runner and real Octokit clients against
+local HTTP or controlled fetch fixtures, with no live GitHub credentials required.
+The `test:pagination` and `test:archived` commands remain available for focused runs.
+
 ### Output
 
 The script uses colored terminal output with pass (✅) / fail (❌) indicators and prints a summary at the end:
