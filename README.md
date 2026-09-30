@@ -939,9 +939,13 @@ You can pass environment variables; the easiest way to do it is via a `.env` fil
   ```
   DEPLOYMENT_CONFIG_FILE=deployment-settings.yml
   ```
-1. Enable the pull request comment using `ENABLE_PR_COMMENT` (default is `true`). For e.g.
+1. Enable the pull request comment using `CREATE_PR_COMMENT` (default is `true`). For e.g.
   ```
-  ENABLE_PR_COMMENT=true
+  CREATE_PR_COMMENT=true
+  ```
+1. Add an error count, affected-plugin list, check-run link (when available), and unchecked review-verification checkbox to each pull request comment page using `PR_COMMENT_SUMMARY_ENABLED` (default is `false`). Counts and plugins describe the entire operation, not just the current page. Errors count reported error entries after deduplication; affected plugins have rendered changes. GitHub App subjects do not count as affected repositories. Existing repos-considered/affected counts and detailed output remain unchanged when this flag is unset or `false`. Truncated opt-in comments close their collapsible sections before the checkbox, keeping it outside those sections within the 55,536-character limit. The checkbox is descriptive only; it is not automatically checked or enforced. `CREATE_PR_COMMENT=false` still suppresses all PR comments. For e.g.
+  ```
+  PR_COMMENT_SUMMARY_ENABLED=true
   ```
 1. Block repository renaming manually using `BLOCK_REPO_RENAME_BY_HUMAN` (default is `false`). For e.g.
   ```
@@ -1059,6 +1063,9 @@ node smoke-test.js --phase 24
 # Exact team slug NOP diffs and real permission updates (setup + Phase 26 + teardown)
 node smoke-test.js --phase 26
 
+# Opt-in PR comments with owned PR/check-run readback (setup + Phase 27 + teardown)
+node smoke-test.js --phase 27
+
 # Repository and environment variables, including pagination and no-op convergence
 node smoke-test.js --phase 1,13,21
 
@@ -1098,6 +1105,7 @@ The smoke test runs the following phases:
 | **Phase 24** | Runs the real full-sync CLI with explicit `GH_ORG` and `FULL_SYNC_NOP=true`, verifying the selected installation and successful completion; multi-account, no-match, and cron failure scenarios use local mocked tests |
 | **Phase 25** | Creates an owned `smoke-archived-repo`, archives it with real Settings, verifies listing-based skips make zero fixture requests, checks unknown-state and labels-only fallbacks, then verifies unarchive NOP/apply and convergence (requires only Setup; no webhooks) |
 | **Phase 26** | Creates an owned `smoke-team-slug` repo and `Smoke Team Slug 26` team, checks unchanged NOP/apply and exact permission-change diffs against the real API, then verifies one PUT and convergence while preserving inherited security-manager teams. Requires only Setup, refuses existing fixture names, and removes both fixtures even on failure. It does not require webhook forwarding. |
+| **Phase 27** | Creates an owned private `smoke-pr-comment-summary` repo, PR and check runs; calls real reporting with controlled NOP rows and reads back posted comments. Covers unset/false/true summary flags, no-op and disabled comments, subject-aware counts, errors/warnings/info, pagination and the exact truncation limit with review footers. Removes the owned repo and all its fixtures even on failure. Requires only Setup, refuses existing fixture names, and needs no webhook forwarding. This checks generated markup, not visual rendering or reconciliation. |
 | **Teardown** | Shuts down safe-settings, deletes test repos, teams, custom roles, and rulesets |
 
 Run config-loading and existing config-validation coverage with

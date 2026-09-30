@@ -3766,6 +3766,163 @@ async function phase26TeamSlugComparison () {
   log('Phase 26 complete')
 }
 
+async function phase27PrCommentSummary () {
+  logPhase('Phase 27: Opt-in PR comment summary')
+  const Settings = require('./lib/settings')
+  const env = require('./lib/env')
+  const target = { owner: ORG, repo: 'smoke-pr-comment-summary' }
+  const branch = 'smoke-test-phase27'
+  const footer = '\n\n- [ ] I have reviewed the changes and verified that they are intended.'
+  const limit = 55536
+  const requireAssertion = (condition, message) => {
+    if (!assert(condition, `27: ${message}`)) throw new Error(`Phase 27: ${message}`)
+  }
+  try {
+    await octokit.rest.repos.get(target)
+    throw new Error(`Phase 27 refuses to overwrite existing fixture ${target.repo}`)
+  } catch (error) {
+    if (error.status !== 404) throw error
+  }
+  const originalFlags = { CREATE_PR_COMMENT: env.CREATE_PR_COMMENT, PR_COMMENT_SUMMARY_ENABLED: env.PR_COMMENT_SUMMARY_ENABLED }
+  let createdRepo = false
+  const errors = []
+  try {
+    const { data: repository } = await octokit.rest.repos.createInOrg({
+      org: ORG, name: target.repo, private: true, auto_init: true
+    })
+    createdRepo = true
+    const { data: base } = await octokit.rest.git.getRef({ ...target, ref: `heads/${repository.default_branch}` })
+    await octokit.rest.git.createRef({ ...target, ref: `refs/heads/${branch}`, sha: base.object.sha })
+    const { data: file } = await octokit.rest.repos.createOrUpdateFileContents({
+      ...target,
+      path: 'reporting-fixture.txt',
+      branch,
+      message: 'Create owned reporting-only fixture',
+      content: Buffer.from('Controlled NOP results; no repository settings are applied.\n').toString('base64')
+    })
+    const { data: pr } = await octokit.rest.pulls.create({
+      ...target,
+      head: branch,
+      base: repository.default_branch,
+      title: 'Phase 27 owned PR comment summary fixture',
+      body: 'Reporting-only smoke: real Settings and GitHub transport, controlled NOP result rows; no webhook or reconciliation coverage.'
+    })
+    log(`27: owned fixture ${ORG}/${target.repo} PR #${pr.number}, head ${file.commit.sha}`)
+    const change = (plugin, repo, value = true) => ({
+      type: 'INFO',
+      plugin,
+      repo,
+      action: { additions: {}, deletions: {}, modifications: { description: value } }
+    })
+    const message = (type, msg) => ({
+      type,
+      plugin: 'Repository',
+      repo: target.repo,
+      action: { msg, additions: null, deletions: null, modifications: null }
+    })
+    const mixed = [
+      change('Repository', target.repo), change('Branches', target.repo),
+      change('Repository', 'synthetic-second-repo'),
+      { type: 'INFO', plugin: 'app_installations', repo: `${ORG} (org)`, subject: 'synthetic-app', subjectType: 'app', action: { additions: [target.repo], deletions: [], modifications: [] } },
+      message('ERROR', 'controlled error one'), message('ERROR', 'controlled error two'),
+      message('WARNING', 'controlled warning'), message('INFO', 'controlled info')
+    ]
+    const plugins = ['Repository', 'Branches', 'Labels']
+    const pages = plugins.flatMap(plugin => Array.from({ length: 130 }, (_, i) => change(plugin, `synthetic-repo-${i}`, 'x'.repeat(200))))
+    const huge = Array.from({ length: 600 }, (_, i) => change('Repository', `synthetic-repo-${i}`, 'x'.repeat(200)))
+    const cases = [
+      { name: 'unset', flag: undefined, rows: mixed, considered: 3, affected: 2, errors: 2, plugins: 'Repository, Branches, app_installations' },
+      { name: 'false', flag: 'false', rows: mixed, considered: 3, affected: 2, errors: 2, plugins: 'Repository, Branches, app_installations' },
+      { name: 'true', flag: 'true', rows: mixed, considered: 3, affected: 2, errors: 2, plugins: 'Repository, Branches, app_installations' },
+      { name: 'no-op', flag: 'true', rows: [], considered: 0, affected: 0, errors: 0, plugins: 'None' },
+      { name: 'multi-page', flag: 'true', rows: pages, considered: 130, affected: 130, errors: 0, plugins: plugins.join(', ') },
+      { name: 'truncated', flag: 'true', rows: [...huge, message('ERROR', 'preserved trailing error')], considered: 601, affected: 600, errors: 1, plugins: 'Repository' },
+      { name: 'comments-disabled', flag: 'true', create: 'false', rows: [], considered: 0, affected: 0, errors: 0, plugins: 'None' }
+    ]
+    const commentIds = new Set()
+    let defaultBody
+    for (const scenario of cases) {
+      env.PR_COMMENT_SUMMARY_ENABLED = scenario.flag
+      env.CREATE_PR_COMMENT = scenario.create || 'true'
+      const { data: check } = await octokit.rest.checks.create({
+        ...target, name: `Phase 27 reporting ${scenario.name}`, head_sha: file.commit.sha, status: 'in_progress'
+      })
+      log(`27: ${scenario.name} owned check run ${check.id}`)
+      requireAssertion(typeof check.html_url === 'string' && new URL(check.html_url).pathname.startsWith(`/${ORG}/${target.repo}/`),
+        `${scenario.name}: real check-run URL belongs to the owned repo`)
+      const context = {
+        payload: { installation: orgInstallation, repository: { owner: { login: ORG }, name: target.repo }, check_run: { ...check, check_suite: { pull_requests: [{ number: pr.number }] } } },
+        octokit,
+        log: { debug () {}, info: log, error: logFail }
+      }
+      const settings = new Settings(true, context, target, {}, branch)
+      settings.results = structuredClone(scenario.rows)
+      await settings.handleResults()
+      const { data: completed } = await octokit.rest.checks.get({ ...target, check_run_id: check.id })
+      requireAssertion(completed.status === 'completed' && completed.conclusion === (scenario.errors ? 'failure' : 'success'),
+        `${scenario.name}: real check completed with expected conclusion`)
+      const listed = await octokit.paginate(octokit.rest.issues.listComments, { ...target, issue_number: pr.number, per_page: 100 })
+      const comments = listed.filter(comment => !commentIds.has(comment.id))
+      for (const comment of comments) {
+        commentIds.add(comment.id)
+        log(`27: ${scenario.name} owned comment ${comment.id}, length ${comment.body.length}`)
+      }
+      if (scenario.create === 'false') {
+        requireAssertion(comments.length === 0, 'CREATE_PR_COMMENT=false posts no comment')
+        continue
+      }
+      requireAssertion(scenario.name === 'multi-page' ? comments.length > 1 : comments.length === (scenario.name === 'truncated' ? 2 : 1),
+        `${scenario.name}: expected comment page count`)
+      for (const [index, comment] of comments.entries()) {
+        const body = comment.body
+        const header = `#### :robot: Safe-Settings config changes detected${comments.length > 1 ? ` (${index + 1}/${comments.length})` : ''}:\n\n**Repos considered:** ${scenario.considered}\n**Repos affected:** ${scenario.affected}\n\n`
+        const extras = `**Errors:** ${scenario.errors} · **Plugins affected:** ${scenario.plugins}\n\nView the full per-repo breakdown: ${check.html_url}\n\n`
+        requireAssertion(body.length <= limit && body.startsWith(header + (scenario.flag === 'true' ? extras : '')),
+          `${scenario.name} page ${index + 1}: read-back body has exact operation-wide metadata within the limit`)
+        requireAssertion(scenario.flag === 'true'
+          ? body.endsWith(footer)
+          : !body.includes('**Errors:**') && !body.includes(check.html_url) && !body.includes(footer),
+        `${scenario.name} page ${index + 1}: opt-in link and unchecked footer match the flag`)
+      }
+      const combined = comments.map(comment => comment.body).join('\n')
+      if (scenario.name === 'unset') defaultBody = combined
+      if (scenario.name === 'false') requireAssertion(combined === defaultBody, 'unset and false retain byte-identical default output')
+      if (scenario.rows === mixed) {
+        requireAssertion(['controlled error one', 'controlled error two', 'controlled warning', 'controlled info']
+          .every(text => combined.split(text).length === 2), `${scenario.name}: all messages survive once`)
+      }
+      if (scenario.name === 'no-op') requireAssertion(combined.includes('_No changes to apply._'), 'no-op details remain visible')
+      if (scenario.name === 'multi-page') {
+        requireAssertion(!combined.includes('too many changes') &&
+          Array.from({ length: 130 }, (_, i) => `**synthetic-repo-${i}**`).every(text => combined.split(text).length === 4),
+        'multi-page: every repository detail survives across all three plugins')
+      }
+      if (scenario.name === 'truncated') {
+        requireAssertion(comments[0].body.length === limit && comments[0].body.endsWith(`... (too many changes to report)\n\n</details>${footer}`) &&
+          comments[0].body.match(/<\/?(?:details|summary)>/g)?.join('') === '<details><summary></summary></details>' &&
+          comments[1].body.endsWith(`* preserved trailing error\n\n</details>${footer}`),
+        'truncated: exact maximum length, closed section before footer, and trailing error preserved')
+      }
+    }
+  } catch (error) {
+    errors.push(error)
+  } finally {
+    Object.assign(env, originalFlags)
+    if (createdRepo) {
+      try {
+        await octokit.rest.repos.delete(target)
+        log('27: owned repo, PR, check runs, comments and branch removed')
+      } catch (error) {
+        logFail(`27: owned fixture cleanup failed: ${error.message}`)
+        errors.push(error)
+      }
+    }
+  }
+  if (errors.length === 1) throw errors[0]
+  if (errors.length > 1) throw new AggregateError(errors, 'Phase 27 reporting and cleanup failed')
+  log('Phase 27 complete')
+}
+
 async function phase23ConfigLoading () {
   logPhase('Phase 23: Config loading')
   const ConfigManager = require('./lib/configManager')
@@ -4005,7 +4162,8 @@ async function main () {
       ['Phase 23: Config loading', phase23ConfigLoading],
       ['Phase 24: Organization sync targeting', phase24OrganizationSyncTargeting],
       ['Phase 25: Archived repositories', phase25ArchivedRepositories],
-      ['Phase 26: Team slug comparisons', phase26TeamSlugComparison]
+      ['Phase 26: Team slug comparisons', phase26TeamSlugComparison],
+      ['Phase 27: Opt-in PR comment summary', phase27PrCommentSummary]
     ]
 
     // When --phase is given, only run setup (phase 0) + the requested phase(s).
