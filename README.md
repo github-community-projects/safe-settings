@@ -1059,6 +1059,9 @@ node smoke-test.js --phase 24
 # Exact team slug NOP diffs and real permission updates (setup + Phase 26 + teardown)
 node smoke-test.js --phase 26
 
+# Actual posted comment HTML (setup + Phase 28 + teardown; no webhook needed)
+CREATE_PR_COMMENT=true node smoke-test.js --phase 28
+
 # Repository and environment variables, including pagination and no-op convergence
 node smoke-test.js --phase 1,13,21
 
@@ -1098,6 +1101,7 @@ The smoke test runs the following phases:
 | **Phase 24** | Runs the real full-sync CLI with explicit `GH_ORG` and `FULL_SYNC_NOP=true`, verifying the selected installation and successful completion; multi-account, no-match, and cron failure scenarios use local mocked tests |
 | **Phase 25** | Creates an owned `smoke-archived-repo`, archives it with real Settings, verifies listing-based skips make zero fixture requests, checks unknown-state and labels-only fallbacks, then verifies unarchive NOP/apply and convergence (requires only Setup; no webhooks) |
 | **Phase 26** | Creates an owned `smoke-team-slug` repo and `Smoke Team Slug 26` team, checks unchanged NOP/apply and exact permission-change diffs against the real API, then verifies one PUT and convergence while preserving inherited security-manager teams. Requires only Setup, refuses existing fixture names, and removes both fixtures even on failure. It does not require webhook forwarding. |
+| **Phase 28** | Posts mixed change/error and no-op reports through real `Settings.handleResults` to an owned `smoke-comment-markup-28` repository and PR, then reads each comment's GitHub-rendered `body_html` and completed check run. Results are synthetic; API responses and HTML rendering are real. Requires `CREATE_PR_COMMENT=true`, refuses an existing fixture repo, and deletes only its owned repo (including PR, branch, comments, and checks) even on failure. |
 | **Teardown** | Shuts down safe-settings, deletes test repos, teams, custom roles, and rulesets |
 
 Run config-loading and existing config-validation coverage with
@@ -1115,6 +1119,14 @@ not test webhook delivery or multi-organization sync. Setup and Teardown still
 touch the shared fixtures described above, so inventory those resources first.
 The offline `npm run test:archived` suite verifies exact request counts, configuration
 precedence, NOP behavior, and safe PATCH payloads using the installed Octokit.
+
+Phase 28 verifies populated, closed report sections, rendered diff/error list items,
+and the absence of phantom empty rows in the actual posted comment HTML. It does
+not claim visual scrollbar verification or exercise plugin sync/webhook delivery.
+Pagination, long sections, escaping, warning/info messages, and non-repository
+subjects are covered locally in `test/unit/lib/settings-results.test.js`.
+Its Setup and Teardown still touch shared fixtures; inventory those resources
+before running, and verify the spawned server configuration as described below.
 
 The harness rejects a nonempty `CRON` before authentication or setup. However,
 the spawned Probot CLI reloads `.env` and can override explicit environment values.

@@ -3766,6 +3766,148 @@ async function phase26TeamSlugComparison () {
   log('Phase 26 complete')
 }
 
+async function phase28CommentMarkup () {
+  logPhase('Phase 28: Posted comment markup')
+  const Settings = require('./lib/settings')
+  const NopCommand = require('./lib/nopcommand')
+  const env = require('./lib/env')
+  const target = { owner: ORG, repo: 'smoke-comment-markup-28' }
+  const requireAssertion = (condition, message) => {
+    if (!assert(condition, `28: ${message}`)) throw new Error(`Phase 28: ${message}`)
+  }
+  requireAssertion(process.env.GH_ORG?.toLowerCase() === ORG.toLowerCase() &&
+    orgInstallation?.account?.login?.toLowerCase() === ORG.toLowerCase(),
+  'explicit test organization matches the authenticated installation')
+  requireAssertion(env.CREATE_PR_COMMENT === 'true', 'CREATE_PR_COMMENT is explicitly enabled')
+  try {
+    await octokit.rest.repos.get(target)
+    throw new Error('Phase 28 refuses to overwrite existing fixture smoke-comment-markup-28')
+  } catch (error) {
+    if (error.status !== 404) throw error
+  }
+
+  let created = false
+  const posted = []
+  const errors = []
+  let commentPath
+  const observe = async (request, options) => {
+    const response = await request(options)
+    const endpoint = octokit.request.endpoint(options)
+    if (endpoint.method === 'POST' && new URL(endpoint.url).pathname === commentPath) {
+      posted.push(response.data)
+    }
+    return response
+  }
+  try {
+    const { data: repository } = await octokit.rest.repos.createInOrg({
+      org: ORG, name: target.repo, private: true, auto_init: true
+    })
+    created = true
+    requireAssertion(repository.owner.login.toLowerCase() === ORG.toLowerCase(), 'created fixture belongs to the test org')
+    const branch = 'smoke-comment-markup-28'
+    const { data: base } = await octokit.rest.git.getRef({ ...target, ref: `heads/${repository.default_branch}` })
+    await octokit.rest.git.createRef({ ...target, ref: `refs/heads/${branch}`, sha: base.object.sha })
+    await octokit.rest.repos.createOrUpdateFileContents({
+      ...target,
+      branch,
+      path: 'smoke-markup-28.txt',
+      message: 'Comment markup fixture',
+      content: Buffer.from('Owned comment-rendering smoke fixture.\n').toString('base64')
+    })
+    const pr = await createPR(ORG, target.repo, '28: comment markup fixture', branch, repository.default_branch)
+    commentPath = `/repos/${ORG}/${target.repo}/issues/${pr.number}/comments`
+    octokit.hook.wrap('request', observe)
+
+    // Inject results, not HTTP responses: Settings posts real comments/checks,
+    // and GitHub renders the returned HTML. No plugin sync or webhook is claimed.
+    const scenarios = [
+      {
+        name: 'mixed',
+        results: [
+          new NopCommand('Repository', target, null, {
+            additions: {},
+            deletions: { description: 'markup-before-28' },
+            modifications: { description: 'markup-after-28' }
+          }),
+          new NopCommand('Repository', target, null, 'markup-error-28', 'ERROR')
+        ],
+        conclusion: 'failure',
+        sections: 2
+      },
+      { name: 'empty', results: [], conclusion: 'success', sections: 0 }
+    ]
+    for (const scenario of scenarios) {
+      const { data: check } = await octokit.rest.checks.create({
+        ...target, name: `Smoke comment markup 28 ${scenario.name}`, head_sha: pr.head.sha, status: 'in_progress'
+      })
+      const settings = new Settings(true, {
+        payload: {
+          installation: { id: orgInstallation.id },
+          repository,
+          check_run: { id: check.id, check_suite: { pull_requests: [{ number: pr.number }] } }
+        },
+        octokit,
+        log: { debug () {}, info: log, error: message => logFail(`28: ${message}`) }
+      }, target, {}, branch)
+      settings.results = scenario.results
+      const before = posted.length
+      await settings.handleResults()
+      requireAssertion(posted.length === before + 1, `${scenario.name}: Settings posted exactly one owned comment`)
+      const comment = posted.at(-1)
+      const { data: stored } = await octokit.rest.issues.getComment({
+        ...target, comment_id: comment.id, mediaType: { format: 'full' }
+      })
+      requireAssertion(stored.id === comment.id && stored.body === comment.body,
+        `${scenario.name}: read back the exact generated comment`)
+      const html = stored.body_html
+      requireAssertion(typeof html === 'string' && html.length > 0, `${scenario.name}: GitHub returned rendered body_html`)
+      requireAssertion(!/<\/td>\s*<tr\b|<tr\b[^>]*>\s*<\/tr>/i.test(html),
+        `${scenario.name}: rendered HTML has no malformed row ending or phantom empty row`)
+      const sections = html.match(/<details\b[^>]*>[\s\S]*?<\/details>/g) || []
+      requireAssertion(sections.length === scenario.sections &&
+        (html.match(/<details\b/g) || []).length === scenario.sections &&
+        (html.match(/<\/details>/g) || []).length === scenario.sections &&
+        sections.every(section => /<summary\b[^>]*>[\s\S]+?<\/summary>/.test(section)),
+      `${scenario.name}: expected populated summaries have complete details containers`)
+      if (scenario.name === 'mixed') {
+        requireAssertion(sections.some(section =>
+          /<summary\b[^>]*>Repository[^<]*1 repo, 1 setting changed<\/summary>/.test(section) &&
+          /<code\b[^>]*>description<\/code>/.test(section) &&
+          /<li\b[^>]*>before: <code\b[^>]*>markup-before-28<\/code><\/li>/.test(section) &&
+          /<li\b[^>]*>after: <code\b[^>]*>markup-after-28<\/code><\/li>/.test(section)),
+        'mixed: GitHub rendered the actual field diff as code and list items')
+        requireAssertion(sections.some(section =>
+          /<summary\b[^>]*>[\s\S]*?Errors/.test(section) && /<li\b[^>]*>markup-error-28<\/li>/.test(section)),
+        'mixed: GitHub rendered the error as a separate list section')
+      } else {
+        requireAssertion(/<em\b[^>]*>No changes to apply\.<\/em>/.test(html) && /<code\b[^>]*>None<\/code>/.test(html),
+          'empty: GitHub rendered the no-op and no-errors content')
+      }
+      const { data: completed } = await octokit.rest.checks.get({ ...target, check_run_id: check.id })
+      requireAssertion(completed.status === 'completed' && completed.conclusion === scenario.conclusion,
+        `${scenario.name}: real check run completed with the expected conclusion`)
+      log(`28: evidence ${JSON.stringify({ scenario: scenario.name, repository: repository.id, pr: pr.number, check: check.id, comment: comment.id, htmlLength: html.length })}`)
+    }
+  } catch (error) {
+    logFail(`28: comment markup failed: ${error.message}`)
+    errors.push(error)
+  } finally {
+    octokit.hook.remove('request', observe)
+    if (created) {
+      try {
+        // Deleting the owned repo also removes its PR, branch, checks and comments.
+        await octokit.rest.repos.delete(target)
+      } catch (error) {
+        logFail(`28: owned repository cleanup failed: ${error.message}`)
+        errors.push(error)
+      }
+    }
+  }
+  if (errors.length === 1) throw errors[0]
+  if (errors.length > 1) throw new AggregateError(errors, 'Phase 28 reporting and cleanup failed')
+  log('Phase 28 complete')
+}
+
 async function phase23ConfigLoading () {
   logPhase('Phase 23: Config loading')
   const ConfigManager = require('./lib/configManager')
@@ -4005,7 +4147,8 @@ async function main () {
       ['Phase 23: Config loading', phase23ConfigLoading],
       ['Phase 24: Organization sync targeting', phase24OrganizationSyncTargeting],
       ['Phase 25: Archived repositories', phase25ArchivedRepositories],
-      ['Phase 26: Team slug comparisons', phase26TeamSlugComparison]
+      ['Phase 26: Team slug comparisons', phase26TeamSlugComparison],
+      ['Phase 28: Posted comment markup', phase28CommentMarkup]
     ]
 
     // When --phase is given, only run setup (phase 0) + the requested phase(s).
