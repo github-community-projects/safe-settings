@@ -3898,9 +3898,10 @@ async function phase27PrCommentSummary () {
         'multi-page: every repository detail survives across all three plugins')
       }
       if (scenario.name === 'truncated') {
-        requireAssertion(comments[0].body.length === limit && comments[0].body.endsWith(`... (too many changes to report)${footer}`) &&
+        requireAssertion(comments[0].body.length === limit && comments[0].body.endsWith(`... (too many changes to report)\n\n</details>${footer}`) &&
+          comments[0].body.match(/<\/?(?:details|summary)>/g)?.join('') === '<details><summary></summary></details>' &&
           comments[1].body.endsWith(`* preserved trailing error\n\n</details>${footer}`),
-        'truncated: exact maximum length, footer after marker, and trailing error preserved')
+        'truncated: exact maximum length, closed section before footer, and trailing error preserved')
       }
     }
   } catch (error) {

@@ -111,6 +111,14 @@ test('phase 27 exercises real Settings and installed Octokit serialization/readb
   assert.equal(state.requests.filter(item => item.route.startsWith('PATCH ')).length, 7)
   assert(state.comments.every(comment => comment.body.length <= 55536))
   assert(state.comments.some(comment => comment.body.length === 55536))
+  for (const comment of state.comments.filter(comment => comment.body.includes('- [ ]'))) {
+    const openSections = []
+    for (const [tag, name] of comment.body.slice(0, comment.body.indexOf('- [ ]')).matchAll(/<\/?(details|summary)>/g)) {
+      if (tag.startsWith('</')) assert.equal(openSections.pop(), name)
+      else openSections.push(name)
+    }
+    assert.deepEqual(openSections, [], 'the review footer must be outside all rendered containers')
+  }
   assert(state.checks.every(check => check.output.summary.length <= 55536 && !check.output.summary.includes('I have reviewed')))
   assert.deepEqual(state.requests.filter(item => item.route.startsWith('DELETE ')).map(item => item.route),
     ['DELETE /repos/test-org/smoke-pr-comment-summary'])

@@ -223,6 +223,7 @@ describe('Settings result deduplication', () => {
   describe('opt-in PR comment summary', () => {
     const limit = 55536
     const footer = '\n\n- [ ] I have reviewed the changes and verified that they are intended.'
+    const truncation = '... (too many changes to report)'
     const checkUrl = 'https://github.com/test/admin/runs/42'
     const originalFlag = env.PR_COMMENT_SUMMARY_ENABLED
     const bodies = () => context.octokit.rest.issues.createComment.mock.calls.map(([params]) => params.body)
@@ -242,6 +243,16 @@ describe('Settings result deduplication', () => {
       repo: 'test-repo',
       action: { msg, additions: null, deletions: null, modifications: null }
     })
+
+    function expectFooterOutsideSections (body) {
+      expect(body.endsWith(footer)).toBe(true)
+      const sections = []
+      for (const [tag, name] of body.slice(0, -footer.length).matchAll(/<\/?(details|summary)>/g)) {
+        if (tag.startsWith('</')) expect(sections.pop()).toBe(name)
+        else sections.push(name)
+      }
+      expect(sections).toEqual([])
+    }
 
     beforeEach(() => {
       env.PR_COMMENT_SUMMARY_ENABLED = 'true'
@@ -353,7 +364,7 @@ describe('Settings result deduplication', () => {
       expect(comments.length).toBeGreaterThan(1)
       for (const [index, body] of comments.entries()) {
         expect(body.startsWith(header(131, 130, ` (${index + 1}/${comments.length})`) + summary(1, plugins.join(', ')))).toBe(true)
-        expect(body.endsWith(footer)).toBe(true)
+        expectFooterOutsideSections(body)
         expect(body.length).toBeLessThanOrEqual(limit)
         expect(body).not.toContain('too many changes')
         expect(body.match(/<details>/g)?.length || 0).toBe(body.match(/<\/details>/g)?.length || 0)
@@ -371,28 +382,70 @@ describe('Settings result deduplication', () => {
       const comments = bodies()
       expect(comments).toHaveLength(2)
       expect(comments[0]).toHaveLength(limit)
-      expect(comments[0].endsWith(`... (too many changes to report)${footer}`)).toBe(true)
+      expect(comments[0].endsWith(`${truncation}\n\n</details>${footer}`)).toBe(true)
       expect(comments[1].endsWith(`* preserved trailing error\n\n</details>${footer}`)).toBe(true)
       for (const [index, body] of comments.entries()) {
         expect(body.startsWith(header(601, 600, ` (${index + 1}/2)`) + summary(1, 'Repository'))).toBe(true)
         expect(body.length).toBeLessThanOrEqual(limit)
+        expectFooterOutsideSections(body)
       }
       expect(context.octokit.rest.checks.update.mock.calls[0][0].output.summary.length).toBeLessThanOrEqual(limit)
     })
 
-    it.each([-1, 0, 1])('handles a single error section at the final-body limit %+d without losing the footer', async offset => {
-      settings.results = [message('ERROR', 'x')]
+    it.each(['ERROR', 'WARNING', 'INFO'].flatMap(type => [-1, 0, 1].map(offset => [type, offset])))(
+      'keeps the footer outside a %s section at the final-body limit %+d', async (type, offset) => {
+        const heading = { ERROR: '### Errors', WARNING: '### Warnings', INFO: '### Informational messages' }[type]
+        settings.results = [message(type, 'x')]
+        await settings.handleResults()
+        const section = bodies()[0].slice(bodies()[0].indexOf(heading), -footer.length)
+        const fixedLength = header(1, 0, ' (2/2)').length + summary(type === 'ERROR' ? 1 : 0, 'None').length +
+          section.length - 1 + footer.length
+        context.octokit.rest.issues.createComment.mockClear()
+        settings.results = [message(type, 'x'.repeat(limit - fixedLength + offset))]
+        await settings.handleResults()
+        const [, body] = bodies()
+        expect(bodies()).toHaveLength(2)
+        expect(body).toHaveLength(Math.min(limit, limit + offset))
+        expectFooterOutsideSections(body)
+        expect(body.includes(truncation)).toBe(offset > 0)
+        expect(body.endsWith(`${offset > 0 ? truncation : ''}\n\n</details>${footer}`)).toBe(true)
+      }
+    )
+
+    it.each([
+      ['', '<details>', '<summary>nested</summary>value</details>'],
+      ['<details>', '<summary>', 'nested</summary>value</details>'],
+      ['<details><summary>nested', '</summary>', 'value</details>'],
+      ['<details><summary>nested</summary>value', '</details>', '']
+    ])('does not split %s%s when truncation falls inside a container tag', async (before, tag, after) => {
+      settings.results = [message('ERROR', 'x'.repeat(limit))]
       await settings.handleResults()
-      const fixedLength = bodies()[0].length - 1 - '_No changes to apply._\n\n'.length + ' (2/2)'.length
-      context.octokit.rest.issues.createComment.mockClear()
-      settings.results = [message('ERROR', 'x'.repeat(limit - fixedLength + offset))]
+      const contentStart = bodies()[1].indexOf('* ') + 2
+      // Exercise both the initial cut and the cut after reserving closing tags.
+      for (const reservation of [0, '\n\n</details>'.length, '\n\n</summary>\n</details>\n</details>'.length]) {
+        for (let offset = 0; offset <= tag.length; offset++) {
+          context.octokit.rest.issues.createComment.mockClear()
+          const padding = limit - footer.length - truncation.length - contentStart - before.length - reservation - offset
+          settings.results = [message('ERROR', 'x'.repeat(padding) + before + tag + after + 'y'.repeat(limit))]
+          await settings.handleResults()
+          const body = bodies()[1]
+          expectFooterOutsideSections(body)
+          expect(body.length).toBeLessThanOrEqual(limit)
+          expect(body).toContain(truncation)
+          expect(body.replace(/<\/?(?:details|summary)>/g, '')).not.toMatch(/[<>]/)
+        }
+      }
+    })
+
+    it('does not append an unmatched closing tag when truncation precedes all sections', async () => {
+      context.payload.check_run.html_url = `https://github.com/test/admin/runs/42?${'x'.repeat(limit)}`
       await settings.handleResults()
-      const [, body] = bodies()
-      expect(bodies()).toHaveLength(2)
-      expect(body).toHaveLength(Math.min(limit, limit + offset))
-      expect(body.endsWith(footer)).toBe(true)
-      expect(body.includes('... (too many changes to report)')).toBe(offset > 0)
-      if (offset <= 0) expect(body.endsWith(`\n\n</details>${footer}`)).toBe(true)
+      for (const body of bodies()) {
+        expect(body).toHaveLength(limit)
+        expectFooterOutsideSections(body)
+        expect(body).not.toContain('<details>')
+        expect(body).not.toContain('</details>')
+      }
     })
   })
 

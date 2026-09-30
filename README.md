@@ -943,7 +943,7 @@ You can pass environment variables; the easiest way to do it is via a `.env` fil
   ```
   CREATE_PR_COMMENT=true
   ```
-1. Add an error count, affected-plugin list, check-run link (when available), and unchecked review-verification checkbox to each pull request comment page using `PR_COMMENT_SUMMARY_ENABLED` (default is `false`). Counts and plugins describe the entire operation, not just the current page. Errors count reported error entries after deduplication; affected plugins have rendered changes. GitHub App subjects do not count as affected repositories. Existing repos-considered/affected counts and detailed output remain unchanged when this flag is unset or `false`. The checkbox is descriptive only; it is not automatically checked or enforced. `CREATE_PR_COMMENT=false` still suppresses all PR comments. For e.g.
+1. Add an error count, affected-plugin list, check-run link (when available), and unchecked review-verification checkbox to each pull request comment page using `PR_COMMENT_SUMMARY_ENABLED` (default is `false`). Counts and plugins describe the entire operation, not just the current page. Errors count reported error entries after deduplication; affected plugins have rendered changes. GitHub App subjects do not count as affected repositories. Existing repos-considered/affected counts and detailed output remain unchanged when this flag is unset or `false`. Truncated opt-in comments close their collapsible sections before the checkbox, keeping it outside those sections within the 55,536-character limit. The checkbox is descriptive only; it is not automatically checked or enforced. `CREATE_PR_COMMENT=false` still suppresses all PR comments. For e.g.
   ```
   PR_COMMENT_SUMMARY_ENABLED=true
   ```
