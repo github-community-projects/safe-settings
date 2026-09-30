@@ -395,4 +395,183 @@ describe('Settings result deduplication', () => {
       if (offset <= 0) expect(body.endsWith(`\n\n</details>${footer}`)).toBe(true)
     })
   })
+
+  describe('PR #1078 report markup regression', () => {
+    const limit = 55536
+
+    function expectSections (body, count) {
+      // Only inspect the renderer's HTML containers, not Markdown/code values.
+      expect(body.match(/<\/?(?:details|summary)>/g) || []).toEqual(
+        Array.from({ length: count }, () => ['<details>', '<summary>', '</summary>', '</details>']).flat()
+      )
+      expect(body).not.toMatch(/<\/td>\s*<tr>/)
+      expect(body).not.toMatch(/<tr>\s*<\/tr>/)
+      expect(body.length).toBeLessThanOrEqual(limit)
+    }
+
+    function outputs () {
+      expect(context.octokit.rest.checks.update).toHaveBeenCalledTimes(1)
+      const check = context.octokit.rest.checks.update.mock.calls[0][0]
+      const comments = context.octokit.rest.issues.createComment.mock.calls.map(([comment]) => {
+        expect(comment).toMatchObject({ owner: 'test', repo: 'admin', issue_number: 1 })
+        return comment.body
+      })
+      return { check, comments }
+    }
+
+    it.each(['change', 'error', 'mixed'])('renders populated, closed sections for %s results', async kind => {
+      const change = new NopCommand('Repository', repo, null, {
+        additions: {}, deletions: { description: 'before' }, modifications: { description: 'after' }
+      })
+      const error = new NopCommand('Repository', { ...repo, repo: 'failed-repo' }, null, 'fixture failure', 'ERROR')
+      settings.results = kind === 'mixed' ? [change, error] : [kind === 'change' ? change : error]
+
+      await settings.handleResults()
+
+      const { check, comments } = outputs()
+      expect(comments).toHaveLength(1)
+      expect(check.conclusion).toBe(kind === 'change' ? 'success' : 'failure')
+      for (const body of [check.output.summary, ...comments]) {
+        expectSections(body, kind === 'mixed' ? 2 : 1)
+        if (kind !== 'error') {
+          expect(body).toContain('<summary>Repository — 1 repo, 1 setting changed</summary>')
+          expect(body).toContain('**test-repo**\n- `Repository`\n  - ~ `description`\n    - before: `before`\n    - after: `after`\n\n</details>')
+        }
+        if (kind !== 'change') {
+          expect(body).toContain('**failed-repo**:\n* fixture failure')
+        }
+      }
+    })
+
+    it('keeps warning and informational containers separate from change sections', async () => {
+      settings.results = [
+        command(),
+        new NopCommand('Teams', repo, null, 'fixture warning', 'WARNING'),
+        new NopCommand('disable_plugins', repo, null, 'fixture information')
+      ]
+
+      await settings.handleResults()
+
+      const { check, comments } = outputs()
+      expect(check.conclusion).toBe('success')
+      expect(comments).toHaveLength(1)
+      expectSections(comments[0], 3)
+      expect(comments[0]).toContain('### Warnings\n<details>')
+      expect(comments[0]).toContain('* fixture warning')
+      for (const body of [check.output.summary, ...comments]) {
+        expect(body).toContain('`enforce_admins`')
+        expect(body).toContain('[disable_plugins] fixture information')
+      }
+      // Check summaries currently render errors and info, but not warnings.
+      expectSections(check.output.summary, 2)
+    })
+
+    it('reports empty results without an empty change container', async () => {
+      settings.results = [new NopCommand('Repository', repo, null, {
+        additions: {}, deletions: {}, modifications: {}
+      })]
+
+      await settings.handleResults()
+
+      const { check, comments } = outputs()
+      expect(check.conclusion).toBe('success')
+      expect(comments).toHaveLength(1)
+      expect(comments[0]).toContain('_No changes to apply._')
+      expect(comments[0]).toContain('### Errors\n`None`')
+      expect(check.output.summary).toContain('No changes to apply.')
+      for (const body of [check.output.summary, ...comments]) expectSections(body, 0)
+    })
+
+    it('renders non-repository subjects as populated app sections', async () => {
+      settings.results = [{
+        ...new NopCommand('app_installations', { repo: 'test (org)' }, null, {
+          additions: ['added-repo'], deletions: ['removed-repo'], modifications: []
+        }),
+        subject: 'fixture-app',
+        subjectType: 'app'
+      }]
+
+      await settings.handleResults()
+
+      const { check, comments } = outputs()
+      expect(comments).toHaveLength(1)
+      expect(comments[0]).toContain('**Repos affected:** 0')
+      for (const body of [check.output.summary, ...comments]) {
+        expectSections(body, 1)
+        expect(body).toContain('<summary>app_installations — 1 app, 2 settings changed</summary>')
+        expect(body).toContain('**fixture-app**\n- + `added-repo`\n- - `removed-repo`\n\n</details>')
+      }
+    })
+
+    it('escapes diff values instead of interpreting row markup as containers', async () => {
+      settings.results = [new NopCommand('Repository', repo, null, {
+        additions: { description: '<tr><td>fixture & value</td></tr>' }, deletions: {}, modifications: {}
+      })]
+
+      await settings.handleResults()
+
+      const { check, comments } = outputs()
+      expect(comments).toHaveLength(1)
+      for (const body of [check.output.summary, ...comments]) {
+        expectSections(body, 1)
+        expect(body).toContain('`&lt;tr&gt;&lt;td&gt;fixture &amp; value&lt;/td&gt;&lt;/tr&gt;`')
+      }
+    })
+
+    it('paginates long independent sections without splitting their containers or losing content', async () => {
+      const fields = Object.fromEntries(Array.from({ length: 220 }, (_, i) => [`field-${i}`, 'x'.repeat(160)]))
+      settings.results = ['First', 'Second', 'Third'].map(plugin =>
+        new NopCommand(plugin, repo, null, { additions: fields, deletions: {}, modifications: {} })
+      )
+
+      await settings.handleResults()
+
+      const { check, comments } = outputs()
+      expect(comments).toHaveLength(3)
+      comments.forEach((body, i) => {
+        expect(body).toContain(`config changes detected (${i + 1}/3)`)
+        expectSections(body, 1)
+        expect(body).toContain(`<summary>${['First', 'Second', 'Third'][i]} — 1 repo, 1 setting changed</summary>`)
+        expect(body.match(/`field-\d+`/g)).toHaveLength(220)
+        expect(body).toContain('`field-219`')
+        expect(body).not.toContain('too many changes')
+      })
+      expect(check.output.summary).toContain('Detailed changed-field output is available in the pull request comment.')
+      expectSections(check.output.summary, 0)
+      expect(comments[2]).toContain('### Errors\n`None`')
+    })
+
+    it('retains the existing hard limit for a single oversized section', async () => {
+      settings.results = [new NopCommand('Repository', repo, null, {
+        additions: Object.fromEntries(Array.from({ length: 400 }, (_, i) => [`field-${i}`, 'x'.repeat(160)])),
+        deletions: {},
+        modifications: {}
+      })]
+
+      await settings.handleResults()
+
+      const { check, comments } = outputs()
+      expect(comments.length).toBeGreaterThan(0)
+      expect(comments[0]).toContain('<summary>Repository — 1 repo, 1 setting changed</summary>')
+      expect(comments[0]).toContain('`field-0`')
+      expect(comments[0]).toHaveLength(limit)
+      expect(comments[0].endsWith('... (too many changes to report)')).toBe(true)
+      for (const body of [check.output.summary, ...comments]) {
+        expect(body.length).toBeLessThanOrEqual(limit)
+        expect(body).not.toMatch(/<\/td>\s*<tr>/)
+      }
+    })
+
+    it.each(['false', undefined])('keeps check reporting when CREATE_PR_COMMENT is %s', async enabled => {
+      jest.replaceProperty(env, 'CREATE_PR_COMMENT', enabled)
+      settings.results = [command()]
+
+      await settings.handleResults()
+
+      const { check, comments } = outputs()
+      expect(comments).toEqual([])
+      expectSections(check.output.summary, 1)
+      expect(check.output.summary).toContain('`enforce_admins`')
+    })
+  })
 })
