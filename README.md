@@ -991,6 +991,59 @@ You can pass environment variables; the easiest way to do it is via a `.env` fil
 
 3. __[Deploy and install the app](docs/deploy.md)__.  Alternatively, the __[GitHub Actions Guide](docs/github-action.md)__ describes how to run `safe-settings` with GitHub Actions.
 
+## Comment reporting integration tests
+
+The default `npm run test:integration` suite verifies comment/check reporting
+through the installed Octokit with controlled HTTP responses and external
+network access blocked. It covers change/error/no-op reports, pagination,
+comments-disabled mode, and API failures. Formatting edge cases remain in
+`test/unit/lib/settings-results.test.js`. Run just the reporting transport tests:
+
+```bash
+node --test test/integration/transport/comment-markup.test.js
+```
+
+### Optional live GitHub rendering check
+
+Only the comment-markup scenario has an optional live integration command.
+Unlike a smoke test of the running app, it calls `Settings.handleResults`
+directly with synthetic mixed change/error and no-op results, then verifies the
+actual posted comments' GitHub-rendered `body_html` and completed check runs.
+It does not start safe-settings, deliver webhooks, perform plugin sync, or
+claim visual scrollbar verification.
+
+Use **Node 22+** and a **GitHub.com test organization you are authorized to
+modify**. Supply `APP_ID`, `PRIVATE_KEY`, an explicit `GH_ORG`, and
+`CREATE_PR_COMMENT=true`. The App must be installed on that organization and
+able to create/delete a private repository, write its contents, and create
+PRs, comments, and checks; its installation must have access to the new repo.
+
+```bash
+# APP_ID and PRIVATE_KEY must already be exported in the environment.
+GH_ORG=your-test-org CREATE_PR_COMMENT=true npm run integration:live:comment-markup
+
+# Alternatively, explicitly load credentials from a local ignored .env file.
+GH_ORG=your-test-org CREATE_PR_COMMENT=true node --env-file=.env test/live/comment-markup.js
+```
+
+The command does not automatically load `.env`. It verifies App and organization
+installation metadata before installation authentication, without enumerating
+other installations. Requests are restricted to that installation and the
+fixture repository. It refuses to reuse an existing
+`safe-settings-comment-markup-test` repository, creates its own private repo,
+branch and PR, and deletes that same repository (including its comments and
+checks) in cleanup, even on assertion failure. Cleanup verifies the repository
+ID before deletion and requires a subsequent 404; failures exit nonzero. It
+does not run the smoke harness's shared setup/teardown or change admin settings.
+If interrupted or cleanup fails, the logged repository ID identifies the owned
+fixture for manual cleanup; reruns never delete a pre-existing fixture.
+
+This command is deliberately named `integration:live:comment-markup`, outside
+the `test:*` commands run by `npm test`, and its entrypoint is outside the
+default integration test glob. Normal unit/integration/CI runs use no live
+credentials or organization mutations; offline tests of the optional command
+use synthetic credentials and mocked GitHub HTML, not real rendering.
+
 ## Smoke Testing
 
 The repository includes an end-to-end smoke test script (`smoke-test.js`) that validates safe-settings against a live GitHub organization. It starts the app, creates repos/configs via the API, and verifies that safe-settings correctly applies and enforces settings.
@@ -1059,9 +1112,6 @@ node smoke-test.js --phase 24
 # Exact team slug NOP diffs and real permission updates (setup + Phase 26 + teardown)
 node smoke-test.js --phase 26
 
-# Actual posted comment HTML (setup + Phase 28 + teardown; no webhook needed)
-CREATE_PR_COMMENT=true node smoke-test.js --phase 28
-
 # Repository and environment variables, including pagination and no-op convergence
 node smoke-test.js --phase 1,13,21
 
@@ -1101,7 +1151,6 @@ The smoke test runs the following phases:
 | **Phase 24** | Runs the real full-sync CLI with explicit `GH_ORG` and `FULL_SYNC_NOP=true`, verifying the selected installation and successful completion; multi-account, no-match, and cron failure scenarios use local mocked tests |
 | **Phase 25** | Creates an owned `smoke-archived-repo`, archives it with real Settings, verifies listing-based skips make zero fixture requests, checks unknown-state and labels-only fallbacks, then verifies unarchive NOP/apply and convergence (requires only Setup; no webhooks) |
 | **Phase 26** | Creates an owned `smoke-team-slug` repo and `Smoke Team Slug 26` team, checks unchanged NOP/apply and exact permission-change diffs against the real API, then verifies one PUT and convergence while preserving inherited security-manager teams. Requires only Setup, refuses existing fixture names, and removes both fixtures even on failure. It does not require webhook forwarding. |
-| **Phase 28** | Posts mixed change/error and no-op reports through real `Settings.handleResults` to an owned `smoke-comment-markup-28` repository and PR, then reads each comment's GitHub-rendered `body_html` and completed check run. Results are synthetic; API responses and HTML rendering are real. Requires `CREATE_PR_COMMENT=true`, refuses an existing fixture repo, and deletes only its owned repo (including PR, branch, comments, and checks) even on failure. |
 | **Teardown** | Shuts down safe-settings, deletes test repos, teams, custom roles, and rulesets |
 
 Run config-loading and existing config-validation coverage with
@@ -1119,14 +1168,6 @@ not test webhook delivery or multi-organization sync. Setup and Teardown still
 touch the shared fixtures described above, so inventory those resources first.
 The offline `npm run test:archived` suite verifies exact request counts, configuration
 precedence, NOP behavior, and safe PATCH payloads using the installed Octokit.
-
-Phase 28 verifies populated, closed report sections, rendered diff/error list items,
-and the absence of phantom empty rows in the actual posted comment HTML. It does
-not claim visual scrollbar verification or exercise plugin sync/webhook delivery.
-Pagination, long sections, escaping, warning/info messages, and non-repository
-subjects are covered locally in `test/unit/lib/settings-results.test.js`.
-Its Setup and Teardown still touch shared fixtures; inventory those resources
-before running, and verify the spawned server configuration as described below.
 
 The harness rejects a nonempty `CRON` before authentication or setup. However,
 the spawned Probot CLI reloads `.env` and can override explicit environment values.
