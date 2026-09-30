@@ -336,18 +336,18 @@ describe('Teams', () => {
       })
     })
 
-    it('returns original teams when the security manager role is absent', async () => {
+    it('returns normalized teams when the security manager role is absent', async () => {
       const plugin = configure([])
 
       when(github.paginate)
         .calledWith(organizationRolesRoute, { org })
         .mockResolvedValue({ roles: [{ id: any.integer(), name: 'compliance_manager' }] })
 
-      await expect(plugin.find()).resolves.toEqual(repoTeams)
+      await expect(plugin.find()).resolves.toEqual(repoTeams.map(team => ({ ...team, name: team.slug })))
       expect(github.paginate).not.toHaveBeenCalledWith(organizationRoleTeamsRoute, { org, role_id: securityManagerRoleId })
     })
 
-    it('returns original teams when organization role team lookup fails', async () => {
+    it('returns normalized teams when organization role team lookup fails', async () => {
       const plugin = configure([])
 
       when(github.paginate)
@@ -358,7 +358,7 @@ describe('Teams', () => {
         .calledWith(organizationRoleTeamsRoute, { org, role_id: securityManagerRoleId })
         .mockRejectedValue({ status: 500 })
 
-      await expect(plugin.find()).resolves.toEqual(repoTeams)
+      await expect(plugin.find()).resolves.toEqual(repoTeams.map(team => ({ ...team, name: team.slug })))
     })
   })
 

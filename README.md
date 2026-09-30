@@ -1056,6 +1056,9 @@ node smoke-test.js --phase 1,19
 # Explicit GH_ORG full-sync CLI dry run (setup + Phase 24 + teardown)
 node smoke-test.js --phase 24
 
+# Exact team slug NOP diffs and real permission updates (setup + Phase 26 + teardown)
+node smoke-test.js --phase 26
+
 # Repository and environment variables, including pagination and no-op convergence
 node smoke-test.js --phase 1,13,21
 
@@ -1093,6 +1096,7 @@ The smoke test runs the following phases:
 | **Phase 22** | Runs real full-sync NOP against the verified `GH_ORG` installation with controlled enumeration/auth and read-only, org-scoped requests. Requires only Setup; multi-installation fanout and failure isolation are covered by unit/CLI tests, not this single-org smoke |
 | **Phase 23** | Tests real config loading, empty YAML, directories, and missing-file/ref HTTP 404s on an owned temporary branch (requires only Setup) |
 | **Phase 24** | Runs the real full-sync CLI with explicit `GH_ORG` and `FULL_SYNC_NOP=true`, verifying the selected installation and successful completion; multi-account, no-match, and cron failure scenarios use local mocked tests |
+| **Phase 26** | Creates an owned `smoke-team-slug` repo and `Smoke Team Slug 26` team, checks unchanged NOP/apply and exact permission-change diffs against the real API, then verifies one PUT and convergence. Requires only Setup, refuses existing fixture names, and removes both fixtures even on failure. It does not require webhook forwarding. |
 | **Teardown** | Shuts down safe-settings, deletes test repos, teams, custom roles, and rulesets |
 
 Run config-loading and existing config-validation coverage with
