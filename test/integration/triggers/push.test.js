@@ -1,12 +1,12 @@
-const settings = require('../../../lib/settings')
-const { initializeNock, loadInstance, repository, teardownNock } = require('../common')
+const { describe, it, beforeEach, afterEach } = require('node:test')
+const { buildPushEvent, initializeNock, loadInstance, teardownNock } = require('../common')
 
 describe('push trigger', function () {
   let probot, githubScope
 
-  beforeEach(() => {
+  beforeEach(async () => {
     githubScope = initializeNock()
-    probot = loadInstance()
+    probot = await loadInstance()
   })
 
   afterEach(() => {
@@ -14,13 +14,6 @@ describe('push trigger', function () {
   })
 
   it('does not apply configuration when not on the default branch', async () => {
-    await probot.receive({
-      name: 'push',
-      payload: {
-        ref: 'refs/heads/wip',
-        repository,
-        commits: [{ modified: [settings.FILE_PATH], added: [] }]
-      }
-    })
+    await probot.receive(buildPushEvent('wip'))
   })
 })

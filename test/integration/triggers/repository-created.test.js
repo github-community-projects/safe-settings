@@ -1,13 +1,12 @@
-const { NOT_FOUND } = require('http-status-codes')
-const settings = require('../../../lib/settings')
-const { buildRepositoryCreatedEvent, initializeNock, loadInstance, repository, teardownNock } = require('../common')
+const { describe, it, beforeEach, afterEach } = require('node:test')
+const { buildRepositoryCreatedEvent, initializeNock, loadInstance, mockAdminRepository, teardownNock } = require('../common')
 
 describe('repository.created trigger', function () {
   let probot, githubScope
 
-  beforeEach(() => {
+  beforeEach(async () => {
     githubScope = initializeNock()
-    probot = loadInstance()
+    probot = await loadInstance()
   })
 
   afterEach(() => {
@@ -15,18 +14,7 @@ describe('repository.created trigger', function () {
   })
 
   it('does not apply configuration when the repository does not have a settings.yml', async () => {
-    githubScope
-      .get(`/repos/${repository.owner.name}/${repository.name}/contents/${settings.FILE_PATH}`)
-      .reply(NOT_FOUND, {
-        message: 'Not Found',
-        documentation_url: 'https://developer.github.com/v3/repos/contents/#get-contents'
-      })
-    githubScope
-      .get(`/repos/${repository.owner.name}/.github/contents/${settings.FILE_PATH}`)
-      .reply(NOT_FOUND, {
-        message: 'Not Found',
-        documentation_url: 'https://developer.github.com/v3/repos/contents/#get-contents'
-      })
+    mockAdminRepository(githubScope)
 
     await probot.receive(buildRepositoryCreatedEvent())
   })
