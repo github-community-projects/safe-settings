@@ -1096,6 +1096,7 @@ The smoke test runs the following phases:
 | **Phase 22** | Runs real full-sync NOP against the verified `GH_ORG` installation with controlled enumeration/auth and read-only, org-scoped requests. Requires only Setup; multi-installation fanout and failure isolation are covered by unit/CLI tests, not this single-org smoke |
 | **Phase 23** | Tests real config loading, empty YAML, directories, and missing-file/ref HTTP 404s on an owned temporary branch (requires only Setup) |
 | **Phase 24** | Runs the real full-sync CLI with explicit `GH_ORG` and `FULL_SYNC_NOP=true`, verifying the selected installation and successful completion; multi-account, no-match, and cron failure scenarios use local mocked tests |
+| **Phase 25** | Creates an owned `smoke-archived-repo`, archives it with real Settings, verifies listing-based skips make zero fixture requests, checks unknown-state and labels-only fallbacks, then verifies unarchive NOP/apply and convergence (requires only Setup; no webhooks) |
 | **Phase 26** | Creates an owned `smoke-team-slug` repo and `Smoke Team Slug 26` team, checks unchanged NOP/apply and exact permission-change diffs against the real API, then verifies one PUT and convergence while preserving inherited security-manager teams. Requires only Setup, refuses existing fixture names, and removes both fixtures even on failure. It does not require webhook forwarding. |
 | **Teardown** | Shuts down safe-settings, deletes test repos, teams, custom roles, and rulesets |
 
@@ -1105,6 +1106,15 @@ Phase 23 removes its temporary `smoke-test-phase23` branch even on failure.
 HTTP 403/500 and network failures are injected only in local unit tests, which
 also verify original-error identity and full-sync/NOP reporting; the live smoke
 does not change permissions or provoke rate limits.
+
+Run archived-repository coverage with `node smoke-test.js --phase 25`.
+Phase 25 refuses to reuse an existing fixture and removes only the repository it
+created, including on failure. It exercises real installation repository listing
+and repository/label plugins with fixture-only in-memory configuration; it does
+not test webhook delivery or multi-organization sync. Setup and Teardown still
+touch the shared fixtures described above, so inventory those resources first.
+The offline `npm run test:archived` suite verifies exact request counts, configuration
+precedence, NOP behavior, and safe PATCH payloads using the installed Octokit.
 
 The harness rejects a nonempty `CRON` before authentication or setup. However,
 the spawned Probot CLI reloads `.env` and can override explicit environment values.
@@ -1119,6 +1129,13 @@ and page sizes: GitHub can return fewer than the requested 100 items per page.
 Run `npm run test:pagination` on Node 22+ for real installed-Octokit loopback
 coverage of 101 repository and environment variables, server-capped and cursor
 pagination, empty pages, and API failures without live credentials.
+
+The archived-repository, pagination, and team transport suites live under
+`test/integration/transport/` and run automatically
+with `npm run test:integration` and `npm run test:integration:ci`, including in
+Node.js CI. They use Node's native test runner and real Octokit clients against
+local HTTP or controlled fetch fixtures, with no live GitHub credentials required.
+The `test:pagination` and `test:archived` commands remain available for focused runs.
 
 ### Output
 

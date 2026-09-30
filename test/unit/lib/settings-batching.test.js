@@ -76,7 +76,7 @@ describe('Repository sync batching', () => {
     expect(maxActive).toBe(Math.min(10, count))
     expect(active).toBe(0)
     expect(settings.processedRepoNames).toEqual(new Set(repos.map(repo => repo.name)))
-    expect(update).toHaveBeenCalledWith({ owner: admin.owner, repo: 'repo-0' })
+    expect(update).toHaveBeenCalledWith({ owner: admin.owner, repo: 'repo-0' }, true)
     expect(context.octokit.paginate).toHaveBeenCalledWith('GET /installation/repositories')
   })
 
@@ -161,7 +161,7 @@ describe('Repository sync batching', () => {
 
     expect(await settings.eachRepositoryRepos(context.octokit, context.log))
       .toEqual(repos.map(repo => included.includes(repo.name) ? repo.name : null))
-    expect(update.mock.calls).toEqual(included.map(repo => [{ owner: admin.owner, repo }]))
+    expect(update.mock.calls).toEqual(included.map(repo => [{ owner: admin.owner, repo }, repo === 'repo-0']))
     expect(settings.processedRepoNames).toEqual(new Set(repos.map(repo => repo.name)))
     expect(settings.errors).toEqual([])
   })
@@ -184,7 +184,6 @@ describe('Repository sync batching', () => {
     await settings.eachRepositoryRepos(context.octokit, context.log)
 
     expect(sync.mock.calls).toEqual([
-      [{ owner: admin.owner, repo: 'repo-0' }],
       [{ owner: admin.owner, repo: 'repo-12' }]
     ])
     expect(settings.errors).toEqual([])
@@ -228,7 +227,7 @@ describe('Repository sync batching', () => {
 
     expect(orgRulesets).toHaveBeenCalledTimes(1)
     expect(update).toHaveBeenCalledTimes(13)
-    expect(update).toHaveBeenLastCalledWith({ owner: admin.owner, repo: 'new-repo' })
+    expect(update).toHaveBeenLastCalledWith({ owner: admin.owner, repo: 'new-repo' }, undefined)
     expect(result.errors).toEqual([{
       owner: admin.owner,
       repo: 'repo-0',
@@ -278,7 +277,7 @@ describe('Repository sync batching', () => {
     await Settings.syncSelectedRepos(false, context, [], subOrgs, { restrictedRepos: {} }, 'main')
 
     expect(update).toHaveBeenCalledTimes(24)
-    expect(update).toHaveBeenLastCalledWith({ owner: admin.owner, repo: 'repo-11' })
+    expect(update).toHaveBeenLastCalledWith({ owner: admin.owner, repo: 'repo-11' }, false)
     expect(orgRulesets).toHaveBeenCalledTimes(1)
     expect(apps).toHaveBeenCalledTimes(1)
     const check = context.octokit.rest.checks.create.mock.calls[0][0]
@@ -287,7 +286,7 @@ describe('Repository sync batching', () => {
   })
 
   it.each(['archive', 'repository', 'child'])('retains caught %s failures through real NOP processing and full-sync exit status', async stage => {
-    const repos = repositories(12)
+    const repos = repositories(12).map(repo => ({ ...repo, archived: false }))
     const failedRepos = ['repo-0', 'repo-10']
     const fail = repo => {
       if (failedRepos.includes(repo.repo)) throw new Error(`${stage} failed for ${repo.repo}`)

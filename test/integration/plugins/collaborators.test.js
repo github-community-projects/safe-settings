@@ -22,6 +22,9 @@ describe('collaborators plugin', function () {
     const encodedConfig = configFile.toString('base64')
     mockAdminRepository(githubScope, encodedConfig)
     githubScope
+      .get(`/repos/${repository.owner.name}/${repository.name}`)
+      .reply(OK, { ...repository, archived: false })
+    githubScope
       .get(`/repos/${repository.owner.name}/${repository.name}/collaborators?affiliation=direct`)
       .reply(
         OK,
@@ -39,6 +42,16 @@ describe('collaborators plugin', function () {
     githubScope
       .delete(`/repos/${repository.owner.name}/${repository.name}/collaborators/travi`)
       .reply(NO_CONTENT)
+
+    await probot.receive(buildTriggerEvent())
+  })
+
+  it('skips collaborator writes when the repository is archived', async () => {
+    const pathToConfig = path.resolve(__dirname, '..', '..', 'fixtures', 'collaborators-config.yml')
+    mockAdminRepository(githubScope, fs.readFileSync(pathToConfig).toString('base64'))
+    githubScope
+      .get(`/repos/${repository.owner.name}/${repository.name}`)
+      .reply(OK, { ...repository, archived: true })
 
     await probot.receive(buildTriggerEvent())
   })

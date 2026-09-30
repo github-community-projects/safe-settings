@@ -28,6 +28,9 @@ describe('teams plugin', function () {
     const securityManagerTeamId = any.integer()
     mockAdminRepository(githubScope, encodedConfig)
     githubScope
+      .get(`/repos/${repository.owner.name}/${repository.name}`)
+      .reply(OK, { ...repository, archived: false })
+    githubScope
       .get(`/repos/${repository.owner.name}/${repository.name}/teams`)
       .reply(
         OK,

@@ -28,6 +28,9 @@ describe('repository.edited trigger', function () {
 
   it('does not apply configuration when the repository does not have a settings.yml', async () => {
     mockAdminRepository(githubScope)
+    githubScope
+      .get(`/repos/${repository.owner.login}/${repository.name}`)
+      .reply(200, { ...repository, archived: false })
 
     await probot.receive(buildRepositoryEditedEvent())
   })
