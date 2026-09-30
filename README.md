@@ -991,59 +991,6 @@ You can pass environment variables; the easiest way to do it is via a `.env` fil
 
 3. __[Deploy and install the app](docs/deploy.md)__.  Alternatively, the __[GitHub Actions Guide](docs/github-action.md)__ describes how to run `safe-settings` with GitHub Actions.
 
-## Comment reporting integration tests
-
-The default `npm run test:integration` suite verifies comment/check reporting
-through the installed Octokit with controlled HTTP responses and external
-network access blocked. It covers change/error/no-op reports, pagination,
-comments-disabled mode, and API failures. Formatting edge cases remain in
-`test/unit/lib/settings-results.test.js`. Run just the reporting transport tests:
-
-```bash
-node --test test/integration/transport/comment-markup.test.js
-```
-
-### Optional live GitHub rendering check
-
-Only the comment-markup scenario has an optional live integration command.
-Unlike a smoke test of the running app, it calls `Settings.handleResults`
-directly with synthetic mixed change/error and no-op results, then verifies the
-actual posted comments' GitHub-rendered `body_html` and completed check runs.
-It does not start safe-settings, deliver webhooks, perform plugin sync, or
-claim visual scrollbar verification.
-
-Use **Node 22+** and a **GitHub.com test organization you are authorized to
-modify**. Supply `APP_ID`, `PRIVATE_KEY`, an explicit `GH_ORG`, and
-`CREATE_PR_COMMENT=true`. The App must be installed on that organization and
-able to create/delete a private repository, write its contents, and create
-PRs, comments, and checks; its installation must have access to the new repo.
-
-```bash
-# APP_ID and PRIVATE_KEY must already be exported in the environment.
-GH_ORG=your-test-org CREATE_PR_COMMENT=true npm run integration:live:comment-markup
-
-# Alternatively, explicitly load credentials from a local ignored .env file.
-GH_ORG=your-test-org CREATE_PR_COMMENT=true node --env-file=.env test/live/comment-markup.js
-```
-
-The command does not automatically load `.env`. It verifies App and organization
-installation metadata before installation authentication, without enumerating
-other installations. Requests are restricted to that installation and the
-fixture repository. It refuses to reuse an existing
-`safe-settings-comment-markup-test` repository, creates its own private repo,
-branch and PR, and deletes that same repository (including its comments and
-checks) in cleanup, even on assertion failure. Cleanup verifies the repository
-ID before deletion and requires a subsequent 404; failures exit nonzero. It
-does not run the smoke harness's shared setup/teardown or change admin settings.
-If interrupted or cleanup fails, the logged repository ID identifies the owned
-fixture for manual cleanup; reruns never delete a pre-existing fixture.
-
-This command is deliberately named `integration:live:comment-markup`, outside
-the `test:*` commands run by `npm test`, and its entrypoint is outside the
-default integration test glob. Normal unit/integration/CI runs use no live
-credentials or organization mutations; offline tests of the optional command
-use synthetic credentials and mocked GitHub HTML, not real rendering.
-
 ## Smoke Testing
 
 The repository includes an end-to-end smoke test script (`smoke-test.js`) that validates safe-settings against a live GitHub organization. It starts the app, creates repos/configs via the API, and verifies that safe-settings correctly applies and enforces settings.
