@@ -1156,22 +1156,38 @@ repository:
         expect(repoCtor).not.toHaveBeenCalled()
       })
 
-      it('24. org disable archive → archive plugin getState NOT invoked', async () => {
+      it.each([
+        ['known active', false, false, 0],
+        ['known archived', true, true, 0],
+        ['unknown active', undefined, false, 1],
+        ['unknown archived', undefined, true, 1]
+      ])('disabled archive checks only unknown state without reconciling: %s', async (_name, metadata, isArchived, lookups) => {
         const Archive = require('../../../lib/plugins/archive')
-        const getStateSpy = jest.spyOn(Archive.prototype, 'getState').mockResolvedValue({ shouldArchive: false, shouldUnarchive: false })
-        // RepoPlugin still runs; stub it to a no-op constructor.
+        const getStateSpy = jest.spyOn(Archive.prototype, 'getState').mockResolvedValue({
+          isArchived,
+          shouldArchive: !isArchived,
+          shouldUnarchive: isArchived
+        })
+        const archiveSyncSpy = jest.spyOn(Archive.prototype, 'sync').mockResolvedValue([])
         const repoSync = jest.fn().mockResolvedValue([])
         Settings.PLUGINS.repository = jest.fn().mockImplementation(() => ({ sync: repoSync, renamed: false, created: false }))
         const settings = createSettings({
           disable_plugins: ['archive'],
-          repository: { name: 'r' }
+          repository: { name: 'r', archived: !isArchived }
         })
+        settings.subOrgConfigMap = null
         settings.subOrgConfigs = {}
         settings.repoConfigs = {}
         jest.spyOn(settings, 'childPluginsList').mockReturnValue([])
-        await settings.updateRepos({ owner: 'o', repo: 'r' })
-        expect(getStateSpy).not.toHaveBeenCalled()
-        getStateSpy.mockRestore()
+        try {
+          await settings.updateRepos({ owner: 'o', repo: 'r' }, metadata)
+          expect(getStateSpy).toHaveBeenCalledTimes(lookups)
+          expect(archiveSyncSpy).not.toHaveBeenCalled()
+          expect(repoSync).toHaveBeenCalledTimes(isArchived ? 0 : 1)
+        } finally {
+          getStateSpy.mockRestore()
+          archiveSyncSpy.mockRestore()
+        }
       })
     })
 

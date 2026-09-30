@@ -196,13 +196,59 @@ test('known-archived repo cannot be unarchived when the archive plugin is disabl
   assert.equal(f.requests.length, 1)
 })
 
-test('disabling archive preserves active-repo updates without the archive state lookup', async () => {
+test('disabling archive preserves known-active-repo updates without the archive state lookup', async () => {
   const f = await fixture({ archived: false })
   f.settings.config.disable_plugins = ['archive']
   await f.sync()
   assert.equal(f.requests.filter(r => r.path === repoPath && r.method === 'GET').length, 2)
   assert.equal(f.writes().length, 2)
 })
+
+for (const caller of ['single repo', 'listing']) {
+  async function syncUnknown (f) {
+    if (caller === 'single repo') return f.settings.updateRepos(repo)
+    f.github.hook.after('request', response => {
+      if (response.data.repositories) delete response.data.repositories[0].archived
+    })
+    await f.sync()
+  }
+
+  for (const nop of [false, true]) {
+    for (const repository of [null, { description: 'desired' }, { archived: false, description: 'desired' }]) {
+      test(`disabled archive: unknown archived ${caller} skips ${JSON.stringify(repository)} (nop=${nop})`, async () => {
+        const f = await fixture({ repository, nop })
+        f.settings.config.disable_plugins = ['archive']
+        await syncUnknown(f)
+        const repoRequests = f.requests.filter(r => r.path !== '/installation/repositories')
+        assert.deepEqual(repoRequests.map(({ method, path }) => [method, path]), [['GET', repoPath]])
+        assert.deepEqual(f.writes(), [])
+        assert.equal(f.live.archived, true)
+        assert.deepEqual(f.labels, [])
+        assert.deepEqual(f.settings.results.filter(r => r.plugin !== 'disable_plugins'), [])
+        assert.deepEqual(f.settings.errors, [])
+        assert.deepEqual(f.errors, [])
+      })
+    }
+  }
+
+  for (const repository of [null, { description: 'desired' }]) {
+    test(`disabled archive: unknown active ${caller} checks state then updates ${JSON.stringify(repository)}`, async () => {
+      const f = await fixture({ archived: false, repository })
+      f.settings.config.disable_plugins = ['archive']
+      await syncUnknown(f)
+      assert.equal(f.requests.filter(r => r.path === repoPath && r.method === 'GET').length, repository ? 3 : 2)
+      const expectedWrites = repository
+        ? [['PATCH', repoPath], ['POST', `${repoPath}/labels`]]
+        : [['POST', `${repoPath}/labels`]]
+      assert.deepEqual(f.writes().map(({ method, path }) => [method, path]), expectedWrites)
+      assert.equal(f.writes().some(r => Object.hasOwn(r.body, 'archived')), false)
+      assert.equal(f.live.archived, false)
+      assert.deepEqual(f.labels, [label])
+      assert.deepEqual(f.settings.errors, [])
+      assert.deepEqual(f.errors, [])
+    })
+  }
+}
 
 test('repository restrictions and suborg selection still skip without any per-repo request', async () => {
   for (const selection of ['restricted', 'suborg']) {
