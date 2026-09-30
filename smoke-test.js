@@ -3585,11 +3585,21 @@ async function phase26TeamSlugComparison () {
     requireAssertion(team.name === teamName && team.slug === teamSlug && team.name !== team.slug,
       'owned team has a real display-name/slug mismatch')
 
-    await plugin(false).sync()
     const listTeams = () => octokit.paginate(octokit.rest.repos.listTeams, target)
+    const teamState = records => records.map(({ id, name, slug, permission }) => ({ id, name, slug, permission }))
+      .sort((a, b) => a.id - b.id)
+    const inheritedState = teamState(await listTeams())
+    log(`26: inherited repository teams before assignment: ${JSON.stringify(inheritedState)}`)
+    requireAssertion((await plugin(true).find()).length === 0,
+      'new repository has no pre-existing managed teams; inherited security managers remain unmanaged')
+    const matchesExpectedTeams = (records, permission) => isDeepStrictEqual(teamState(records), teamState([
+      ...inheritedState, { id: team.id, name: teamName, slug: teamSlug, permission }
+    ]))
+    await plugin(false).sync()
     let listed = await listTeams()
-    requireAssertion(listed.length === 1 && listed[0].id === team.id && listed[0].name === teamName &&
-      listed[0].slug === teamSlug && listed[0].permission === 'pull', 'real apply adds only the owned team with pull permission')
+    log(`26: repository teams after assignment: ${JSON.stringify(teamState(listed))}`)
+    requireAssertion(matchesExpectedTeams(listed, 'pull'),
+      'real apply adds only the owned team with pull permission and preserves inherited teams')
     requireAssertion(errors.length === 0, 'initial assignment has no plugin errors')
 
     octokit.hook.wrap('request', observe)
@@ -3613,15 +3623,15 @@ async function phase26TeamSlugComparison () {
       commands[1].body.permission === 'push', 'proposed action uses the actual team slug and push permission')
     requireAssertion(changed.hasChanges === true && writes.length === 0, 'changed NOP signals changes without writing')
     listed = await listTeams()
-    requireAssertion(listed.length === 1 && listed[0].permission === 'pull', 'NOP leaves live permissions unchanged')
+    requireAssertion(matchesExpectedTeams(listed, 'pull'), 'NOP leaves all live team identities and permissions unchanged')
 
     await plugin(false, 'push').sync()
     requireAssertion(writes.length === 1 && writes[0].method === 'PUT' &&
       writes[0].path === permissionPath && writes[0].body.permission === 'push',
     'real permission change performs exactly one slug-targeted PUT')
     listed = await listTeams()
-    requireAssertion(listed.length === 1 && listed[0].id === team.id && listed[0].permission === 'push',
-      'real permission change preserves team identity and converges to push')
+    requireAssertion(matchesExpectedTeams(listed, 'push'),
+      'real permission change preserves inherited teams and owned identity while converging to push')
     const converged = plugin(true, 'push')
     requireAssertion(await converged.sync() === undefined && converged.hasChanges === false,
       'converged NOP has no changes')

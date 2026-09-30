@@ -38,9 +38,11 @@ describe('team slug smoke fixture ownership', () => {
       log: jest.fn(),
       logFail,
       assert: condition => condition,
+      URL,
       require: name => {
         if (name === './lib/plugins/teams') return Teams
-        if (name === 'node:util') return { isDeepStrictEqual }
+        // Compare values across the VM boundary without comparing realm prototypes.
+        if (name === 'node:util') return { isDeepStrictEqual: (a, b) => isDeepStrictEqual(JSON.parse(JSON.stringify(a)), JSON.parse(JSON.stringify(b))) }
         throw new Error(`Unexpected dependency ${name}`)
       }
     })
@@ -83,5 +85,55 @@ describe('team slug smoke fixture ownership', () => {
     expect(github.rest.repos.delete).toHaveBeenCalledTimes(1)
     expect(github.rest.teams.deleteInOrg).toHaveBeenCalledWith({ org: 'test-org', team_slug: 'smoke-team-slug-26' })
     expect(logFail).toHaveBeenCalledWith('26: fixture cleanup failed: Repo deletion failed')
+  })
+
+  it('preserves an inherited security-manager team throughout the real Teams lifecycle', async () => {
+    const inherited = { id: 10355510, name: 'security-mangers', slug: 'security-mangers', permission: 'pull' }
+    const owned = { id: 42, name: 'Smoke Team Slug 26', slug: 'smoke-team-slug-26' }
+    let created = false
+    let permission
+    let observer
+    const writes = []
+    github.rest.repos.listTeams = jest.fn()
+    github.rest.teams.create.mockImplementation(async () => {
+      created = true
+      return { data: owned }
+    })
+    github.rest.teams.getByName.mockImplementation(async () => created ? { data: owned } : missing())
+    github.paginate.mockImplementation(async route => {
+      if (route === github.rest.repos.listTeams) return [inherited, ...(permission ? [{ ...owned, permission }] : [])]
+      if (route === 'GET /orgs/{org}/organization-roles') return [{ id: 138, name: 'security_manager' }]
+      if (route === 'GET /orgs/{org}/organization-roles/{role_id}/teams') return [inherited]
+      throw new Error(`Unexpected pagination route ${route}`)
+    })
+    const endpoint = (route, params) => {
+      if (typeof route === 'object') return route
+      const [method, template] = route.split(' ')
+      const url = `https://api.github.com${template.replace(/:(\w+)|{(\w+)}/g, (_, colon, brace) => params[colon || brace])}`
+      return { method, url, body: params }
+    }
+    github.request = jest.fn(async (route, params) => {
+      const options = endpoint(route, params)
+      const apply = async () => {
+        expect(options.method).toBe('PUT')
+        expect(params.team_slug).toBe(owned.slug)
+        permission = params.permission
+        writes.push({ slug: params.team_slug, permission })
+        return {}
+      }
+      return observer ? observer(apply, options) : apply()
+    })
+    github.request.endpoint = endpoint
+    github.rest.teams.addOrUpdateRepoPermissionsInOrg = params =>
+      github.request('PUT /orgs/:owner/teams/:team_slug/repos/:owner/:repo', params)
+    github.hook.wrap = jest.fn((name, callback) => { observer = callback })
+    github.hook.remove.mockImplementation(() => { observer = undefined })
+
+    await phase()
+
+    expect(writes).toEqual([{ slug: owned.slug, permission: 'pull' }, { slug: owned.slug, permission: 'push' }])
+    expect(inherited).toEqual({ id: 10355510, name: 'security-mangers', slug: 'security-mangers', permission: 'pull' })
+    expect(logFail).not.toHaveBeenCalled()
+    expect(github.rest.teams.deleteInOrg).toHaveBeenCalledWith({ org: 'test-org', team_slug: owned.slug })
   })
 })
