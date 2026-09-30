@@ -217,6 +217,19 @@ custom_properties:
   - name: test
     value: test
 
+# Alternatively, preserve selected values owned by other automation.
+# Exclusions are case-insensitive regexes, not globs. Includes take precedence.
+# Other undeclared values are cleared (set to null).
+# custom_properties:
+#   include:
+#     - name: environment
+#       value: production
+#   exclude:
+#     - name: '^external-'
+#     - name: '^OWNER$'
+# Include/exclude lists merge across org, suborg and repo layers.
+# Invalid objects or patterns report a per-repo error and suppress all clears.
+
 # See the docs (https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/managing-repository-settings/configuring-autolinks-to-reference-external-resources) for a description of autolinks and replacement values.
 autolinks:
   - key_prefix: "JIRA-"
@@ -247,20 +260,23 @@ rulesets:
 
     # The actors that can bypass the rules in this ruleset
     bypass_actors:
-      # - actor_id: number
-      #   # type: The type of actor that can bypass a ruleset
-      #   - RepositoryRole
-      #   - Team
-      #   - Integration
-      #   - OrganizationAdmin
-      #   actor_type: Team
-      #   #  When the specified actor can bypass the ruleset. `pull_request`
-      #   #  means that an actor can only bypass rules on pull requests.
-      #     - always
-      #     - pull_request
-      #   bypass_mode: pull_request
+      - actor_id: number
+        # type: The type of actor that can bypass a ruleset
+        # - RepositoryRole
+        # - Team
+        # - Integration
+        # - OrganizationAdmin
+        # - DeployKey
+        actor_type: Team
+        #  When the specified actor can bypass the ruleset. `pull_request`
+        #  means that an actor can only bypass rules on pull requests.
+        #  - always
+        #  - pull_request
+        bypass_mode: pull_request
 
-      - actor_id: 1
+      # GitHub ignores actor_id for OrganizationAdmin and DeployKey and returns
+      # null. Use null (or omit actor_id) for these actor types.
+      - actor_id: null
         actor_type: OrganizationAdmin
         bypass_mode: always
 

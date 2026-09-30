@@ -363,6 +363,12 @@ Notes:
 > ⚠️ **Warning:**
 When `{{EXTERNALLY_DEFINED}}` is removed from an existing branch protection rule or ruleset configuration, the status checks in the existing rules in GitHub will revert to the checks that are defined in safe-settings. From this point onwards, all status checks configured through the GitHub UI will be reverted back to the safe-settings configuration.
 
+Entries in the organization-level `centralized_ruleset_bypass_actors` replace
+matching actors in individual rulesets. For `OrganizationAdmin` and `DeployKey`,
+identity is the actor type alone: GitHub ignores `actor_id`, so omitted, null,
+and concrete IDs all refer to the same actor. The centralized entry's
+`bypass_mode` takes precedence without adding a duplicate actor.
+
 #### Referencing ruleset bypass actors and reviewers by name
 
 Rulesets normally require numeric ids for `bypass_actors[].actor_id` and for the
@@ -644,6 +650,62 @@ disable_plugins:
     target: all
 ```
 
+### Preserving unmanaged custom properties
+
+The legacy `custom_properties` list enforces declared values and clears
+undeclared values by setting them to `null`; GitHub does not delete the property
+definition. To preserve values owned by other automation while still clearing
+other undeclared values, use the object form:
+
+```yaml
+custom_properties:
+  include:
+    - name: environment
+      value: production
+    - property_name: services
+      value: [api, worker]
+  exclude:
+    - name: '^external-'
+    - name: '^OWNER$'
+```
+
+`include`, `exclude`, or both may be specified. Exclusions are case-insensitive
+JavaScript regular expressions, **not globs**; use `.*`, not `*`, to match all
+names. Regex escapes and character classes retain their normal meaning. Included
+properties take precedence over exclusions, including an explicit `value: null`
+to clear a value. An exclude-only object preserves matching properties and
+clears unmatched properties. Protected properties are omitted from dry-run
+deletions and commands, not merely skipped at apply time.
+
+Org, suborg and repo layers can mix the list and object forms. When any active
+layer uses the object form, includes merge by case-insensitive property name
+(`name` and `property_name` are aliases), and the more specific layer replaces
+the complete value, including a multi-value array. Exclusions accumulate across
+layers; an included property can override an inherited exclusion. Empty lists
+do not remove inherited entries or patterns. A `custom_properties: null` layer
+resets inherited custom-property configuration. All-list configurations retain
+their existing merge behavior.
+
+Malformed objects, invalid include values, and invalid exclusion entries or
+regexes are recorded as per-repository configuration errors without aborting
+other repositories. No values are cleared for that repository; valid non-null
+included values can still be applied. Schema validation is an authoring aid,
+not a replacement for these runtime safeguards.
+
+`additive_plugins: [custom_properties]` remains the simpler option to suppress
+**all** undeclared-value clears. It still allows declared values to be applied.
+`disable_plugins` strips the configured layers before includes and exclusions
+are merged, using its existing target semantics.
+
+Smoke phase **20** verifies selective preservation, exact create/update/clear
+values, include precedence, exclude-only reconciliation, case-insensitive regex
+escapes, invalid-regex NOP failure, and real-Octokit dry-run PATCH commands.
+It creates a dedicated `smoke-property-exclusions` repo and
+`smoke-exclusion-*` property definitions, refuses pre-existing fixtures, and
+removes its owned resources afterward. Run with `npm run smoke-test:phase -- 20`
+only in a dedicated test organization; the harness also runs its normal setup
+and teardown.
+
 ### Additive plugins (`additive_plugins`)
 
 `additive_plugins` is the complementary "soft mode" to `disable_plugins`. When a
@@ -877,9 +939,13 @@ You can pass environment variables; the easiest way to do it is via a `.env` fil
   ```
   DEPLOYMENT_CONFIG_FILE=deployment-settings.yml
   ```
-1. Enable the pull request comment using `ENABLE_PR_COMMENT` (default is `true`). For e.g.
+1. Enable the pull request comment using `CREATE_PR_COMMENT` (default is `true`). For e.g.
   ```
-  ENABLE_PR_COMMENT=true
+  CREATE_PR_COMMENT=true
+  ```
+1. Add an error count, affected-plugin list, check-run link (when available), and unchecked review-verification checkbox to each pull request comment page using `PR_COMMENT_SUMMARY_ENABLED` (default is `false`). Counts and plugins describe the entire operation, not just the current page. Errors count reported error entries after deduplication; affected plugins have rendered changes. GitHub App subjects do not count as affected repositories. Existing repos-considered/affected counts and detailed output remain unchanged when this flag is unset or `false`. Truncated opt-in comments close their collapsible sections before the checkbox, keeping it outside those sections within the 55,536-character limit. The checkbox is descriptive only; it is not automatically checked or enforced. `CREATE_PR_COMMENT=false` still suppresses all PR comments. For e.g.
+  ```
+  PR_COMMENT_SUMMARY_ENABLED=true
   ```
 1. Block repository renaming manually using `BLOCK_REPO_RENAME_BY_HUMAN` (default is `false`). For e.g.
   ```
@@ -889,6 +955,22 @@ You can pass environment variables; the easiest way to do it is via a `.env` fil
   ```
   CREATE_DEFAULT_BRANCH=true
   ```
+1. Scope CLI and cron full syncs to one account using `GH_ORG`. For e.g.
+  ```
+  GH_ORG=my-org
+  ```
+  A full sync (`CRON` or `npm run full-sync`) selects the installation whose
+  account login matches `GH_ORG` case-insensitively and reads configuration from
+  that account's `<ADMIN_REPO>`. If no installation matches, including when the
+  app has no installations, the sync fails instead of syncing another account.
+  This also applies to dry runs (`FULL_SYNC_NOP=true`); the CLI exits nonzero on
+  a targeting error, and cron reports the execution as failed.
+  When `GH_ORG` is unset, all repository-owning installations are synced
+  sequentially. Set it to restrict full sync to one account; enterprise
+  installations supply app-management context but are not repository sync targets.
+  Webhook events still use their own installation context. `GH_ORG` is also used
+  by the [manifest flow](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest)
+  to choose where the app is registered.
 
 
 ### Runtime Settings
@@ -972,6 +1054,25 @@ node smoke-test.js --phase 1-3
 npm run smoke-test:phase -- 1,3,5
 node smoke-test.js --phase 1,3,5
 
+# Bypass actor apply/NOP convergence (Phase 1 creates the required test repo)
+node smoke-test.js --phase 1,19
+
+# Explicit GH_ORG full-sync CLI dry run (setup + Phase 24 + teardown)
+node smoke-test.js --phase 24
+
+# Exact team slug NOP diffs and real permission updates (setup + Phase 26 + teardown)
+node smoke-test.js --phase 26
+
+# Opt-in PR comments with owned PR/check-run readback (setup + Phase 27 + teardown)
+node smoke-test.js --phase 27
+
+# Repository and environment variables, including pagination and no-op convergence
+node smoke-test.js --phase 1,13,21
+
+# Full-sync NOP with real Settings, restricted to the verified test-org installation
+# Clear harness CRON; see the spawned-server configuration warning below.
+CRON= node smoke-test.js --phase 22
+
 # Mix range + interactive
 npm run smoke-test:phase -- 1-3 interactive
 node smoke-test.js --phase 1-3 --interactive
@@ -997,7 +1098,52 @@ The smoke test runs the following phases:
 | **Phase 11** | Validates `additive_plugins` — verifies additive-mode plugin behaviour |
 | **Phase 12** | Tests `custom_properties` plugin |
 | **Phase 13** | Tests the `variables` plugin (create, update, remove variables) |
+| **Phase 19** | Tests ignored `OrganizationAdmin`/`DeployKey` IDs, order-independent NOP convergence, real bypass-mode/role-ID changes, and no redundant updates (requires Phase 1) |
+| **Phase 21** | Reads all pages of 101 repository variables and 100 environment variables, verifies unchanged NOP/apply writes nothing, and updates only the two boundary variables (requires Phases 1 and 13) |
+| **Phase 22** | Runs real full-sync NOP against the verified `GH_ORG` installation with controlled enumeration/auth and read-only, org-scoped requests. Requires only Setup; multi-installation fanout and failure isolation are covered by unit/CLI tests, not this single-org smoke |
+| **Phase 23** | Tests real config loading, empty YAML, directories, and missing-file/ref HTTP 404s on an owned temporary branch (requires only Setup) |
+| **Phase 24** | Runs the real full-sync CLI with explicit `GH_ORG` and `FULL_SYNC_NOP=true`, verifying the selected installation and successful completion; multi-account, no-match, and cron failure scenarios use local mocked tests |
+| **Phase 25** | Creates an owned `smoke-archived-repo`, archives it with real Settings, verifies listing-based skips make zero fixture requests, checks unknown-state and labels-only fallbacks, then verifies unarchive NOP/apply and convergence (requires only Setup; no webhooks) |
+| **Phase 26** | Creates an owned `smoke-team-slug` repo and `Smoke Team Slug 26` team, checks unchanged NOP/apply and exact permission-change diffs against the real API, then verifies one PUT and convergence while preserving inherited security-manager teams. Requires only Setup, refuses existing fixture names, and removes both fixtures even on failure. It does not require webhook forwarding. |
+| **Phase 27** | Creates an owned private `smoke-pr-comment-summary` repo, PR and check runs; calls real reporting with controlled NOP rows and reads back posted comments. Covers unset/false/true summary flags, no-op and disabled comments, subject-aware counts, errors/warnings/info, pagination and the exact truncation limit with review footers. Removes the owned repo and all its fixtures even on failure. Requires only Setup, refuses existing fixture names, and needs no webhook forwarding. This checks generated markup, not visual rendering or reconciliation. |
 | **Teardown** | Shuts down safe-settings, deletes test repos, teams, custom roles, and rulesets |
+
+Run config-loading and existing config-validation coverage with
+`node smoke-test.js --phase 10,23` (Setup and Teardown run automatically).
+Phase 23 removes its temporary `smoke-test-phase23` branch even on failure.
+HTTP 403/500 and network failures are injected only in local unit tests, which
+also verify original-error identity and full-sync/NOP reporting; the live smoke
+does not change permissions or provoke rate limits.
+
+Run archived-repository coverage with `node smoke-test.js --phase 25`.
+Phase 25 refuses to reuse an existing fixture and removes only the repository it
+created, including on failure. It exercises real installation repository listing
+and repository/label plugins with fixture-only in-memory configuration; it does
+not test webhook delivery or multi-organization sync. Setup and Teardown still
+touch the shared fixtures described above, so inventory those resources first.
+The offline `npm run test:archived` suite verifies exact request counts, configuration
+precedence, NOP behavior, and safe PATCH payloads using the installed Octokit.
+
+The harness rejects a nonempty `CRON` before authentication or setup. However,
+the spawned Probot CLI reloads `.env` and can override explicit environment values.
+This check does not guarantee that the server's CRON, webhook forwarding, or
+enterprise verification remains disabled. Phase 22's controlled installation
+boundary applies to its direct NOP call, not the spawned server; verify the
+server's effective configuration separately before running against a shared App.
+
+GitHub [limits each environment to 100 variables](https://docs.github.com/en/actions/reference/workflows-and-actions/variables#limits-for-configuration-variables),
+so Phase 21 stays within that live limit. The phase records actual API next links
+and page sizes: GitHub can return fewer than the requested 100 items per page.
+Run `npm run test:pagination` on Node 22+ for real installed-Octokit loopback
+coverage of 101 repository and environment variables, server-capped and cursor
+pagination, empty pages, and API failures without live credentials.
+
+The archived-repository, pagination, and team transport suites live under
+`test/integration/transport/` and run automatically
+with `npm run test:integration` and `npm run test:integration:ci`, including in
+Node.js CI. They use Node's native test runner and real Octokit clients against
+local HTTP or controlled fetch fixtures, with no live GitHub credentials required.
+The `test:pagination` and `test:archived` commands remain available for focused runs.
 
 ### Output
 

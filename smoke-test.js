@@ -148,6 +148,7 @@ class InteractiveExit extends Error {
 // ─── Octokit client (initialized in main) ────────────────────────────────────
 
 let octokit = null
+let orgInstallation = null
 // Enterprise-installation-authenticated client (Phase 17). Null when the app
 // is not installed on the enterprise or GH_ENTERPRISE is unset.
 let entOctokit = null
@@ -2472,6 +2473,98 @@ async function phase14RegressionCoverage () {
   }
 }
 
+async function phase21VariablePagination () {
+  logPhase('Phase 21: Variable pagination - 101 repository variables and 100 environment variables')
+  const Variables = require('./lib/plugins/variables')
+  const Environments = require('./lib/plugins/environments')
+  const target = { owner: ORG, repo: 'test' }
+  const environmentName = 'smoke-pagination'
+  const variables = Array.from({ length: 101 }, (_, i) => ({
+    name: `SMOKE_PAGE_${String(i).padStart(3, '0')}`,
+    value: `value-${i}`
+  }))
+  // GitHub permits only 100 variables per environment. The transport tests
+  // also cover 101 environment variables; this phase stays within the live limit.
+  const environmentVariables = variables.slice(0, 100).map(v => ({ ...v, name: v.name.toLowerCase() }))
+  const errors = []
+  const pluginLog = { debug () {}, info: log, error: log }
+  const repositoryPlugin = nop => new Variables(nop, octokit, target, structuredClone(variables), pluginLog, errors)
+  const environmentPlugin = nop => new Environments(nop, octokit, target, [{ name: environmentName, variables: structuredClone(environmentVariables) }], pluginLog, errors)
+  const requireAssertion = (condition, message) => {
+    if (!assert(condition, `21: ${message}`)) throw new Error(`Phase 21: ${message}`)
+  }
+
+  requireAssertion((await repositoryPlugin(false).find()).length === 0, 'repository fixture starts empty after phase 13')
+  const { data: environments } = await octokit.request('GET /repos/{owner}/{repo}/environments', target)
+  requireAssertion(environments.environments.length === 0, 'no pre-existing environments are overwritten')
+  await octokit.request('PUT /repos/{owner}/{repo}/environments/{environment_name}', { ...target, environment_name: environmentName })
+  requireAssertion((await environmentPlugin(false).find())[0].variables.length === 0, 'empty environment variable page maps to an empty list')
+
+  log('Seeding pagination fixtures sequentially (one write per second)...')
+  for (const variable of variables) {
+    await octokit.request('POST /repos/{owner}/{repo}/actions/variables', { ...target, ...variable })
+    await sleep(1000)
+  }
+  for (const variable of environmentVariables) {
+    await octokit.request('POST /repos/{owner}/{repo}/environments/{environment_name}/variables', { ...target, environment_name: environmentName, ...variable })
+    await sleep(1000)
+  }
+
+  const writes = []
+  const variableReads = []
+  const environmentReads = []
+  const observe = async (request, options) => {
+    if (options.method !== 'GET') writes.push({ method: options.method, url: options.url })
+    const response = await request(options)
+    if (options.method === 'GET' && Array.isArray(response.data.variables)) {
+      const reads = options.url.includes('/actions/variables') ? variableReads : environmentReads
+      reads.push({
+        url: octokit.request.endpoint(options).url,
+        next: (response.headers.link || '').match(/<([^>]+)>;\s*rel="next"/)?.[1],
+        count: response.data.variables.length
+      })
+    }
+    return response
+  }
+  const followsPages = (pages, count) => pages.length > 0 &&
+    pages.reduce((sum, page) => sum + page.count, 0) === count &&
+    pages.every((page, index) =>
+      page.count > 0 && page.count <= 100 &&
+      new URL(page.url).searchParams.get('per_page') === '100' &&
+      page.next === pages[index + 1]?.url)
+  octokit.hook.wrap('request', observe)
+  try {
+    const found = await repositoryPlugin(false).find()
+    requireAssertion(JSON.stringify(found) === JSON.stringify(variables), 'all 101 repository names and values are returned in their original shape')
+    log(`Repository variable page evidence: ${JSON.stringify(variableReads)}`)
+    requireAssertion(variableReads.length > 1 && followsPages(variableReads, 101),
+      'repository listing follows every API next link with per_page=100, even when the server returns smaller pages')
+    const foundEnvironment = await environmentPlugin(false).find()
+    requireAssertion(JSON.stringify(foundEnvironment[0].variables) === JSON.stringify(environmentVariables), 'all 100 environment names and values are normalized correctly')
+    log(`Environment variable page evidence: ${JSON.stringify(environmentReads)}`)
+    requireAssertion(followsPages(environmentReads, 100), 'environment listing follows every API next link with per_page=100')
+
+    for (const nop of [true, false]) {
+      const repoResult = await repositoryPlugin(nop).sync()
+      const envResult = await environmentPlugin(nop).sync()
+      requireAssertion(!nop || ((repoResult === undefined || repoResult.length === 0) && envResult.length === 0), 'unchanged NOP returns no proposed variable changes')
+      requireAssertion(errors.length === 0 && writes.length === 0, `${nop ? 'NOP' : 'apply'} creates no duplicates and performs no updates`)
+    }
+
+    variables[100].value = 'updated-page-two'
+    environmentVariables[99].value = 'updated-environment-boundary'
+    await repositoryPlugin(false).sync()
+    await environmentPlugin(false).sync()
+    requireAssertion(errors.length === 0, 'page-boundary updates report no API errors')
+    requireAssertion(writes.length === 2 && writes.every(w => w.method === 'PATCH'), 'only the two changed variables are patched, without duplicate creates')
+    requireAssertion(JSON.stringify(await repositoryPlugin(false).find()) === JSON.stringify(variables), 'repository page-two update preserves every variable')
+    requireAssertion(JSON.stringify((await environmentPlugin(false).find())[0].variables) === JSON.stringify(environmentVariables), 'environment boundary update preserves every variable')
+  } finally {
+    octokit.hook.remove('request', observe)
+  }
+  log('Phase 21 complete')
+}
+
 async function teardown () {
   logPhase('Phase 9: Teardown')
 
@@ -3185,7 +3278,814 @@ async function phase18TeamIncludeExclude () {
   await deleteBranch(ORG, ADMIN_REPO, branch)
 }
 
+async function phase20CustomPropertyExclusions () {
+  logPhase('Phase 20: Custom property exclusions')
+  const repo = 'smoke-property-exclusions'
+  const prefix = 'smoke-exclusion-'
+  const names = ['managed', 'created', 'externalabc', 'external123', 'explicit-clear'].map(name => prefix + name)
+  const branches = []
+  const pullRequests = []
+  const createdProperties = []
+  const configPath = `${CONFIG_PATH}/repos/${repo}.yml`
+  const defaultBranch = await getDefaultBranch()
+  let createdRepo = false
+  let createdConfig = false
+  let invalidPR
+
+  const readValues = async () => {
+    const values = await octokit.paginate('GET /repos/{owner}/{repo}/properties/values', { owner: ORG, repo, per_page: 100 })
+    return Object.fromEntries(values.map(property => [property.property_name, property.value]))
+  }
+  const verifyValues = async (expected, label) => {
+    const matched = await poll(async () => {
+      const values = await readValues()
+      return Object.entries(expected).every(([name, value]) => (values[prefix + name] ?? null) === value)
+    }, { desc: label, timeout: 60000 })
+    if (!assert(!!matched, label)) throw new Error(label)
+  }
+  const config = customProperties => {
+    const yaml = require('js-yaml')
+    return yaml.dump({
+      repository: { name: repo, private: true },
+      custom_properties: customProperties
+    })
+  }
+  const publish = async (suffix, content, conclusion = 'success') => {
+    const branch = `smoke-test-phase20-${suffix}`
+    await createBranch(ORG, ADMIN_REPO, branch)
+    branches.push(branch)
+    await createOrUpdateFile(ORG, ADMIN_REPO, configPath, content, branch, `20: ${suffix}`)
+    const pr = await createPR(ORG, ADMIN_REPO, `20: custom property ${suffix}`, branch, defaultBranch)
+    pullRequests.push(pr.number)
+    if (conclusion === 'failure') invalidPR = pr.number
+    await sleep(WEBHOOK_SETTLE_MS)
+    const checkRun = await waitForCheckRun(ORG, ADMIN_REPO, pr.head.sha)
+    if (!assert(checkRun?.conclusion === conclusion, `20 ${suffix}: NOP check concludes ${conclusion}`)) {
+      throw new Error(`20 ${suffix}: NOP check did not conclude ${conclusion}`)
+    }
+    return { pr, checkRun }
+  }
+
+  // Refuse collisions rather than taking ownership of pre-existing resources.
+  try {
+    await octokit.rest.repos.get({ owner: ORG, repo })
+    logFail(`Phase 20 fixture repo ${repo} already exists`)
+    throw new Error(`Phase 20 fixture repo ${repo} already exists`)
+  } catch (error) {
+    if (error.status !== 404) throw error
+  }
+  const { data: definitions } = await octokit.request('GET /orgs/{org}/properties/schema', { org: ORG })
+  if (definitions.some(property => names.includes(property.property_name))) {
+    logFail('Phase 20 fixture property definitions already exist')
+    throw new Error('Phase 20 fixture property definitions already exist')
+  }
+  try {
+    await octokit.rest.repos.getContent({ owner: ORG, repo: ADMIN_REPO, path: configPath, ref: defaultBranch })
+    logFail(`Phase 20 fixture config ${configPath} already exists`)
+    throw new Error(`Phase 20 fixture config ${configPath} already exists`)
+  } catch (error) {
+    if (error.status !== 404) throw error
+  }
+
+  try {
+    for (const name of names) {
+      await octokit.request('PUT /orgs/{org}/properties/schema/{custom_property_name}', {
+        org: ORG, custom_property_name: name, value_type: 'string', required: false
+      })
+      createdProperties.push(name)
+    }
+    await octokit.rest.repos.createInOrg({ org: ORG, name: repo, private: true, auto_init: true })
+    createdRepo = true
+    await sleep(WEBHOOK_SETTLE_MS)
+    await octokit.request('PATCH /repos/{owner}/{repo}/properties/values', {
+      owner: ORG,
+      repo,
+      properties: [
+        { property_name: prefix + 'managed', value: 'old' },
+        { property_name: prefix + 'externalabc', value: 'keep' },
+        { property_name: prefix + 'external123', value: 'clear' },
+        { property_name: prefix + 'explicit-clear', value: 'clear' }
+      ]
+    })
+    const initial = { managed: 'old', created: null, externalabc: 'keep', external123: 'clear', 'explicit-clear': 'clear' }
+    await verifyValues(initial, '20: seeded fixture values are exact')
+
+    const desired = {
+      include: [
+        { name: prefix + 'managed', value: 'new' },
+        { property_name: prefix + 'created', value: 'created' },
+        { name: prefix + 'explicit-clear', value: null }
+      ],
+      exclude: [
+        { name: '^SMOKE-EXCLUSION-EXTERNAL\\D+$' },
+        { name: '^SMOKE-EXCLUSION-(MANAGED|EXPLICIT-CLEAR)$' }
+      ]
+    }
+    const { pr, checkRun } = await publish('apply', config(desired))
+    const output = `${checkRun.output?.summary || ''}\n${checkRun.output?.text || ''}`
+    assert(!output.includes(prefix + 'externalabc'), '20: protected property absent from NOP summary')
+    await verifyValues(initial, '20: NOP leaves all seeded values unchanged')
+
+    // Exercise the installed Octokit endpoint builder as well as the rendered
+    // webhook report; no mocked endpoint methods or simulated API response.
+    const CustomProperties = require('./lib/plugins/custom_properties')
+    const errors = []
+    const plugin = new CustomProperties(true, octokit, { owner: ORG, repo }, desired, {
+      debug: () => {}, info: log, error: log
+    }, errors)
+    const commands = await plugin.sync()
+    assert(errors.length === 0, '20: real-Octokit NOP has no errors')
+    assert(!JSON.stringify(commands).includes(prefix + 'externalabc'), '20: protected property absent from NOP commands')
+    const patches = commands.filter(command => command.endpoint).flatMap(command => command.body.properties)
+    for (const [name, value] of Object.entries({ managed: 'new', created: 'created', external123: null, 'explicit-clear': null })) {
+      assert(patches.some(property => property.property_name === prefix + name && property.value === value),
+        `20: NOP PATCH contains exact ${name} value`)
+    }
+    if (!await safeMerge(ORG, ADMIN_REPO, pr.number)) throw new Error('20: apply PR could not be merged')
+    createdConfig = true
+    const applied = { managed: 'new', created: 'created', externalabc: 'keep', external123: null, 'explicit-clear': null }
+    await verifyValues(applied, '20: apply creates, updates and clears exact values; exclusions/include precedence honored')
+
+    await publish('invalid', config({ include: desired.include, exclude: [{ name: '*' }] }), 'failure')
+    await verifyValues(applied, '20: invalid-regex NOP leaves live values unchanged')
+    await octokit.rest.pulls.update({ owner: ORG, repo: ADMIN_REPO, pull_number: invalidPR, state: 'closed' })
+    invalidPR = undefined
+
+    const only = await publish('exclude-only', config({ exclude: [{ name: '^SMOKE-EXCLUSION-EXTERNAL\\D+$' }] }))
+    if (!await safeMerge(ORG, ADMIN_REPO, only.pr.number)) throw new Error('20: exclude-only PR could not be merged')
+    await verifyValues({ managed: null, created: null, externalabc: 'keep', external123: null, 'explicit-clear': null },
+      '20: exclude-only preserves exact match and clears other fixture values')
+    log('Phase 20 assertions completed')
+  } catch (error) {
+    logFail(`Phase 20 failed: ${error.message}`)
+    throw error
+  } finally {
+    let cleanupFailed = false
+    const cleanup = async (label, operation) => {
+      try {
+        await operation()
+      } catch (error) {
+        cleanupFailed = true
+        logFail(`Phase 20 cleanup ${label}: ${error.message}`)
+      }
+    }
+    for (const pullNumber of pullRequests) {
+      await cleanup(`PR ${pullNumber}`, async () => {
+        const { data } = await octokit.rest.pulls.get({ owner: ORG, repo: ADMIN_REPO, pull_number: pullNumber })
+        if (data.state === 'open') await octokit.rest.pulls.update({ owner: ORG, repo: ADMIN_REPO, pull_number: pullNumber, state: 'closed' })
+      })
+    }
+    if (createdConfig) {
+      await cleanup('config', async () => {
+        const { data } = await octokit.rest.repos.getContent({ owner: ORG, repo: ADMIN_REPO, path: configPath, ref: defaultBranch })
+        await octokit.rest.repos.deleteFile({
+          owner: ORG, repo: ADMIN_REPO, path: configPath, branch: defaultBranch, sha: data.sha, message: 'Clean phase 20 fixture config'
+        })
+      })
+    }
+    if (createdRepo) await cleanup('repo', () => octokit.rest.repos.delete({ owner: ORG, repo }))
+    for (const name of createdProperties) {
+      await cleanup(name, () => octokit.request('DELETE /orgs/{org}/properties/schema/{custom_property_name}', { org: ORG, custom_property_name: name }))
+    }
+    for (const branch of branches) {
+      await deleteBranch(ORG, ADMIN_REPO, branch)
+    }
+    if (cleanupFailed) throw new Error('Phase 20 fixture cleanup incomplete')
+    log('Phase 20 owned fixtures cleaned')
+  }
+}
+
+async function phase19BypassActorConvergence () {
+  logPhase('Phase 19: Ruleset ignored bypass actor IDs and convergence')
+  const defaultBranch = await getDefaultBranch()
+  const name = 'smoke-null-bypass-actors'
+  const actor = (actorType, actorId, bypassMode = 'always') => ({
+    actor_type: actorType,
+    ...(actorId === undefined ? {} : { actor_id: actorId }),
+    bypass_mode: bypassMode
+  })
+  const steps = [
+    ['19a', 'create', [
+      actor('OrganizationAdmin', 1), actor('DeployKey', 1), actor('RepositoryRole', 4), actor('RepositoryRole', 5)
+    ], true],
+    ['19b', 'reorder and omit ignored ids', [
+      actor('RepositoryRole', 5), actor('DeployKey', null), actor('OrganizationAdmin', undefined), actor('RepositoryRole', 4)
+    ], false],
+    ['19c', 'change bypass mode and remove a real role id', [
+      actor('OrganizationAdmin', null, 'pull_request'), actor('DeployKey', null), actor('RepositoryRole', 5)
+    ], true],
+    ['19d', 'converge with concrete ignored ids', [
+      actor('RepositoryRole', 5), actor('DeployKey', 9), actor('OrganizationAdmin', 8, 'pull_request')
+    ], false]
+  ]
+  const sortActors = actors => actors.slice().sort((a, b) =>
+    `${a.actor_type}:${a.actor_id}`.localeCompare(`${b.actor_type}:${b.actor_id}`))
+  let previous
+
+  for (const [id, description, actors, changes] of steps) {
+    const branch = `smoke-test-phase${id}`
+    const attrs = {
+      name,
+      target: 'branch',
+      enforcement: 'disabled',
+      conditions: { ref_name: { include: ['~DEFAULT_BRANCH'], exclude: [] } },
+      bypass_actors: actors,
+      rules: [{ type: 'deletion' }]
+    }
+    // Keep unrelated property and pull-request-rule defaults out of NOP checks.
+    const configYaml = require('js-yaml').dump({ repository: { name: 'test' }, rulesets: [attrs] })
+    await deleteBranch(ORG, ADMIN_REPO, branch)
+    await createBranch(ORG, ADMIN_REPO, branch)
+    await createOrUpdateFile(ORG, ADMIN_REPO, `${CONFIG_PATH}/repos/test.yml`, configYaml, branch, `${id}: ${description}`)
+    const pr = await createPR(ORG, ADMIN_REPO, `${id}: bypass actors ${description}`, branch, defaultBranch)
+
+    await sleep(WEBHOOK_SETTLE_MS)
+    const checkRun = await waitForCheckRun(ORG, ADMIN_REPO, pr.head.sha)
+    if (!assert(checkRun && checkRun.conclusion === 'success', `${id}: NOP check completed successfully`)) {
+      throw new Error(`${id}: cannot apply without a successful NOP check`)
+    }
+    const summary = checkRun.output && checkRun.output.summary
+    if (changes) {
+      assert(summary && summary.includes(name), `${id}: NOP reports the changed bypass actor policy`)
+    } else {
+      assert(summary && /No changes to apply/i.test(summary), `${id}: NOP reports no changes after ignored-id/reordering changes`)
+    }
+
+    if (!await safeMerge(ORG, ADMIN_REPO, pr.number)) return
+    await sleep(WEBHOOK_SETTLE_MS)
+    const expectedActors = sortActors(actors.map(entry => actor(
+      entry.actor_type,
+      entry.actor_type === 'OrganizationAdmin' || entry.actor_type === 'DeployKey' ? null : entry.actor_id,
+      entry.bypass_mode
+    )))
+    const details = await poll(async () => {
+      const ruleset = await getRepoRuleset(ORG, 'test', name)
+      if (!ruleset) return null
+      const live = await getRepoRulesetDetails(ORG, 'test', ruleset.id)
+      if (!live || !Array.isArray(live.bypass_actors)) return null
+      const actualActors = sortActors(live.bypass_actors.map(entry => actor(entry.actor_type, entry.actor_id, entry.bypass_mode)))
+      return JSON.stringify(actualActors) === JSON.stringify(expectedActors) ? live : null
+    }, { desc: `${id}: exact bypass actors, modes and real role ids to be applied` })
+    if (!assert(details !== null, `${id}: exact actor set applied with null ignored IDs and expected real IDs`)) {
+      throw new Error(`${id}: bypass actor state did not converge`)
+    }
+    if (previous) {
+      assert(details.id === previous.id, `${id}: existing ruleset updated in place`)
+      if (!changes) {
+        assert(typeof details.updated_at === 'string' && details.updated_at === previous.updated_at, `${id}: second sync did not rewrite the ruleset`)
+      }
+    }
+    previous = details
+    await deleteBranch(ORG, ADMIN_REPO, branch)
+  }
+}
+
+async function phase25ArchivedRepositories () {
+  logPhase('Phase 25: Archived repository request savings and unarchive')
+  const Settings = require('./lib/settings')
+  const target = { owner: ORG, repo: 'smoke-archived-repo' }
+  const targetPath = `/repos/${ORG}/${target.repo}`.toLowerCase()
+  const managedLabel = { name: 'smoke-archive-25', color: 'abcdef', description: 'Archive regression' }
+  const requireAssertion = (condition, message) => {
+    if (!assert(condition, `25: ${message}`)) throw new Error(`Phase 25: ${message}`)
+  }
+  requireAssertion(process.env.GH_ORG && orgInstallation?.target_type === 'Organization' &&
+    orgInstallation.account?.login?.toLowerCase() === ORG.toLowerCase(),
+  'explicit GH_ORG matches the authenticated test installation')
+
+  let created = false
+  const run = async (config, { nop = false, listed = true } = {}) => {
+    const requests = []
+    const listing = []
+    const errors = []
+    const logger = { debug () {}, info: log, warn: log, error: message => { errors.push(message); log(message) } }
+    const settings = new Settings(nop, {
+      payload: { installation: { id: orgInstallation.id } }, octokit, log: logger
+    }, { owner: ORG, repo: ADMIN_REPO }, {
+      ...config, restrictedRepos: { include: [target.repo] }, additive_plugins: ['labels']
+    }, 'main')
+    settings.subOrgConfigs = {}
+    settings.repoConfigs = {}
+    const observe = async (request, options) => {
+      const endpoint = octokit.request.endpoint(options)
+      const pathname = decodeURIComponent(new URL(endpoint.url).pathname).toLowerCase()
+      if (pathname === targetPath || pathname.startsWith(`${targetPath}/`)) {
+        const body = typeof endpoint.body === 'string' ? JSON.parse(endpoint.body) : endpoint.body
+        requests.push({ method: endpoint.method, path: pathname, body })
+      }
+      const response = await request(options)
+      if (pathname === '/installation/repositories') {
+        listing.push(...response.data.repositories.filter(repo => repo.name === target.repo))
+      }
+      return response
+    }
+    octokit.hook.wrap('request', observe)
+    try {
+      if (listed) await settings.eachRepositoryRepos(octokit, logger)
+      else await settings.updateRepos(target)
+    } finally {
+      octokit.hook.remove('request', observe)
+    }
+    requireAssertion(settings.errors.length === 0 && errors.length === 0, 'real Settings reported no errors')
+    if (listed) {
+      requireAssertion(listing.length === 1 && settings.processedRepoNames.has(target.repo),
+        'real installation listing reached checkAndProcessRepo for the fixture')
+    }
+    return { requests, listing, settings, writes: requests.filter(request => request.method !== 'GET') }
+  }
+
+  try {
+    // Never delete or reuse a pre-existing repository, even when run standalone.
+    try {
+      await octokit.rest.repos.get(target)
+      throw new Error(`Phase 25 refuses to overwrite ${target.repo}`)
+    } catch (error) {
+      if (error.status !== 404) throw error
+    }
+    await octokit.rest.repos.createInOrg({ org: ORG, name: target.repo, private: true, auto_init: true })
+    created = true
+    await run({ repository: { archived: true } })
+    requireAssertion((await octokit.rest.repos.get(target)).data.archived === true, 'fixture was archived by real Settings')
+
+    for (const config of [
+      { repository: { description: 'must not apply' }, labels: [managedLabel] },
+      { labels: [managedLabel] }
+    ]) {
+      for (const nop of [false, true]) {
+        const skipped = await run(config, { nop })
+        requireAssertion(skipped.listing[0].archived === true && skipped.requests.length === 0,
+          `${config.repository ? 'repository' : 'labels-only'} ${nop ? 'NOP' : 'apply'} uses listing metadata with zero fixture GETs or writes`)
+      }
+      const fallback = await run(config, { listed: false })
+      requireAssertion(fallback.requests.length === 1 && fallback.requests[0].method === 'GET' &&
+        fallback.requests[0].path === targetPath, 'unknown-state fallback only reads archive state and skips children')
+    }
+
+    const desired = { repository: { archived: false, description: 'Phase 25 unarchived' }, labels: [managedLabel] }
+    const nop = await run(desired, { nop: true })
+    requireAssertion(nop.writes.length === 0 && ['Archive', 'Repository', 'Labels'].every(
+      plugin => nop.settings.results.some(result => result.plugin === plugin)),
+    'unarchive NOP reports archive, repository and label changes without writes')
+    const applied = await run(desired)
+    requireAssertion(applied.writes[0]?.method === 'PATCH' && applied.writes[0]?.body.archived === false &&
+      applied.writes.every(request => request.body?.archived !== true), 'unarchive is the first write and listing metadata never rearchives the fixture')
+    requireAssertion(applied.writes.some(request => request.body?.description === desired.repository.description) &&
+      applied.writes.some(request => request.method === 'POST' && request.path === `${targetPath}/labels`),
+    'repository changes and a real child label write both execute after unarchiving')
+    const { data: live } = await octokit.rest.repos.get(target)
+    requireAssertion(live.archived === false && live.description === desired.repository.description, 'fixture remains unarchived with the desired repository settings')
+    const { data: label } = await octokit.rest.issues.getLabel({ ...target, name: managedLabel.name })
+    requireAssertion(label.color === managedLabel.color, 'managed label was created successfully')
+    const converged = await run(desired)
+    requireAssertion(converged.writes.length === 0, 'second apply converges without repository or child writes')
+    log('Phase 25 complete')
+  } catch (error) {
+    logFail(`25: archived repository regression failed: ${error.message}`)
+    throw error
+  } finally {
+    if (created) {
+      try {
+        await octokit.rest.repos.update({ ...target, archived: false })
+        await octokit.rest.repos.delete(target)
+        log('Phase 25 owned fixture removed')
+      } catch (error) {
+        logFail(`25: could not remove owned fixture: ${error.message}`)
+      }
+    }
+  }
+}
+
+async function phase26TeamSlugComparison () {
+  logPhase('Phase 26: Team slug comparisons')
+  const Teams = require('./lib/plugins/teams')
+  const { isDeepStrictEqual } = require('node:util')
+  const target = { owner: ORG, repo: 'smoke-team-slug' }
+  const teamName = 'Smoke Team Slug 26'
+  const teamSlug = 'smoke-team-slug-26'
+  const permissionPath = `/orgs/${ORG}/teams/${teamSlug}/repos/${ORG}/${target.repo}`
+  const errors = []
+  const writes = []
+  const pluginLog = { debug () {}, info: log, error: log, warn: log }
+  const plugin = (nop, permission = 'pull') => new Teams(nop, octokit, target, [{ name: teamSlug, permission }], pluginLog, errors)
+  const requireAssertion = (condition, message) => {
+    if (!assert(condition, `26: ${message}`)) throw new Error(`Phase 26: ${message}`)
+  }
+  const requireAbsent = async (lookup, name) => {
+    try {
+      await lookup()
+    } catch (error) {
+      if (error.status === 404) return
+      throw error
+    }
+    throw new Error(`Phase 26 refuses to overwrite existing fixture ${name}`)
+  }
+  await requireAbsent(() => octokit.rest.repos.get(target), target.repo)
+  await requireAbsent(() => octokit.rest.teams.getByName({ org: ORG, team_slug: teamSlug }), teamSlug)
+
+  let createdRepo = false
+  let createdTeam
+  let cleanupErrors = []
+  const observe = async (request, options) => {
+    if (options.method !== 'GET') {
+      const endpoint = octokit.request.endpoint(options)
+      writes.push({ method: endpoint.method, path: new URL(endpoint.url).pathname, body: endpoint.body })
+    }
+    return request(options)
+  }
+  try {
+    await octokit.rest.repos.createInOrg({ org: ORG, name: target.repo, private: true })
+    createdRepo = true
+    const { data: team } = await octokit.rest.teams.create({ org: ORG, name: teamName, privacy: 'closed' })
+    createdTeam = team
+    requireAssertion(team.name === teamName && team.slug === teamSlug && team.name !== team.slug,
+      'owned team has a real display-name/slug mismatch')
+
+    const listTeams = () => octokit.paginate(octokit.rest.repos.listTeams, target)
+    const teamState = records => records.map(({ id, name, slug, permission }) => ({ id, name, slug, permission }))
+      .sort((a, b) => a.id - b.id)
+    const inheritedState = teamState(await listTeams())
+    log(`26: inherited repository teams before assignment: ${JSON.stringify(inheritedState)}`)
+    requireAssertion((await plugin(true).find()).length === 0,
+      'new repository has no pre-existing managed teams; inherited security managers remain unmanaged')
+    const matchesExpectedTeams = (records, permission) => isDeepStrictEqual(teamState(records), teamState([
+      ...inheritedState, { id: team.id, name: teamName, slug: teamSlug, permission }
+    ]))
+    await plugin(false).sync()
+    let listed = await listTeams()
+    log(`26: repository teams after assignment: ${JSON.stringify(teamState(listed))}`)
+    requireAssertion(matchesExpectedTeams(listed, 'pull'),
+      'real apply adds only the owned team with pull permission and preserves inherited teams')
+    requireAssertion(errors.length === 0, 'initial assignment has no plugin errors')
+
+    octokit.hook.wrap('request', observe)
+    for (const nop of [true, false]) {
+      const instance = plugin(nop)
+      requireAssertion(await instance.sync() === undefined, `unchanged ${nop ? 'NOP' : 'apply'} emits no result`)
+      requireAssertion(instance.hasChanges === false, `unchanged ${nop ? 'NOP' : 'apply'} does not signal changes`)
+      requireAssertion(writes.length === 0, `unchanged ${nop ? 'NOP' : 'apply'} makes no writes`)
+    }
+
+    const changed = plugin(true, 'push')
+    const commands = (await changed.sync())?.flat(Infinity) || []
+    requireAssertion(commands.length === 2, 'changed NOP returns exactly a summary and one proposed action')
+    requireAssertion(isDeepStrictEqual(commands[0].action, {
+      msg: 'Changes found',
+      additions: [],
+      modifications: [{ permission: 'push', name: teamSlug }],
+      deletions: []
+    }), 'changed NOP reports exactly one permission MODIFY without additions or deletions')
+    requireAssertion(new URL(commands[1].endpoint).pathname === permissionPath &&
+      commands[1].body.permission === 'push', 'proposed action uses the actual team slug and push permission')
+    requireAssertion(changed.hasChanges === true && writes.length === 0, 'changed NOP signals changes without writing')
+    listed = await listTeams()
+    requireAssertion(matchesExpectedTeams(listed, 'pull'), 'NOP leaves all live team identities and permissions unchanged')
+
+    await plugin(false, 'push').sync()
+    requireAssertion(writes.length === 1 && writes[0].method === 'PUT' &&
+      writes[0].path === permissionPath && writes[0].body.permission === 'push',
+    'real permission change performs exactly one slug-targeted PUT')
+    listed = await listTeams()
+    requireAssertion(matchesExpectedTeams(listed, 'push'),
+      'real permission change preserves inherited teams and owned identity while converging to push')
+    const converged = plugin(true, 'push')
+    requireAssertion(await converged.sync() === undefined && converged.hasChanges === false,
+      'converged NOP has no changes')
+    requireAssertion(writes.length === 1 && errors.length === 0, 'no extra writes or plugin errors')
+  } finally {
+    octokit.hook.remove('request', observe)
+    const cleanup = await Promise.allSettled([
+      ...(createdRepo ? [octokit.rest.repos.delete(target)] : []),
+      ...(createdTeam ? [octokit.rest.teams.deleteInOrg({ org: ORG, team_slug: createdTeam.slug })] : [])
+    ])
+    for (const result of cleanup) {
+      if (result.status === 'rejected') logFail(`26: fixture cleanup failed: ${result.reason.message}`)
+    }
+    cleanupErrors = cleanup.filter(result => result.status === 'rejected').map(result => result.reason)
+  }
+  if (cleanupErrors.length) throw new AggregateError(cleanupErrors, 'Phase 26 cleanup failed')
+  log('Phase 26 complete')
+}
+
+async function phase27PrCommentSummary () {
+  logPhase('Phase 27: Opt-in PR comment summary')
+  const Settings = require('./lib/settings')
+  const env = require('./lib/env')
+  const target = { owner: ORG, repo: 'smoke-pr-comment-summary' }
+  const branch = 'smoke-test-phase27'
+  const footer = '\n\n- [ ] I have reviewed the changes and verified that they are intended.'
+  const limit = 55536
+  const requireAssertion = (condition, message) => {
+    if (!assert(condition, `27: ${message}`)) throw new Error(`Phase 27: ${message}`)
+  }
+  try {
+    await octokit.rest.repos.get(target)
+    throw new Error(`Phase 27 refuses to overwrite existing fixture ${target.repo}`)
+  } catch (error) {
+    if (error.status !== 404) throw error
+  }
+  const originalFlags = { CREATE_PR_COMMENT: env.CREATE_PR_COMMENT, PR_COMMENT_SUMMARY_ENABLED: env.PR_COMMENT_SUMMARY_ENABLED }
+  let createdRepo = false
+  const errors = []
+  try {
+    const { data: repository } = await octokit.rest.repos.createInOrg({
+      org: ORG, name: target.repo, private: true, auto_init: true
+    })
+    createdRepo = true
+    const { data: base } = await octokit.rest.git.getRef({ ...target, ref: `heads/${repository.default_branch}` })
+    await octokit.rest.git.createRef({ ...target, ref: `refs/heads/${branch}`, sha: base.object.sha })
+    const { data: file } = await octokit.rest.repos.createOrUpdateFileContents({
+      ...target,
+      path: 'reporting-fixture.txt',
+      branch,
+      message: 'Create owned reporting-only fixture',
+      content: Buffer.from('Controlled NOP results; no repository settings are applied.\n').toString('base64')
+    })
+    const { data: pr } = await octokit.rest.pulls.create({
+      ...target,
+      head: branch,
+      base: repository.default_branch,
+      title: 'Phase 27 owned PR comment summary fixture',
+      body: 'Reporting-only smoke: real Settings and GitHub transport, controlled NOP result rows; no webhook or reconciliation coverage.'
+    })
+    log(`27: owned fixture ${ORG}/${target.repo} PR #${pr.number}, head ${file.commit.sha}`)
+    const change = (plugin, repo, value = true) => ({
+      type: 'INFO',
+      plugin,
+      repo,
+      action: { additions: {}, deletions: {}, modifications: { description: value } }
+    })
+    const message = (type, msg) => ({
+      type,
+      plugin: 'Repository',
+      repo: target.repo,
+      action: { msg, additions: null, deletions: null, modifications: null }
+    })
+    const mixed = [
+      change('Repository', target.repo), change('Branches', target.repo),
+      change('Repository', 'synthetic-second-repo'),
+      { type: 'INFO', plugin: 'app_installations', repo: `${ORG} (org)`, subject: 'synthetic-app', subjectType: 'app', action: { additions: [target.repo], deletions: [], modifications: [] } },
+      message('ERROR', 'controlled error one'), message('ERROR', 'controlled error two'),
+      message('WARNING', 'controlled warning'), message('INFO', 'controlled info')
+    ]
+    const plugins = ['Repository', 'Branches', 'Labels']
+    const pages = plugins.flatMap(plugin => Array.from({ length: 130 }, (_, i) => change(plugin, `synthetic-repo-${i}`, 'x'.repeat(200))))
+    const huge = Array.from({ length: 600 }, (_, i) => change('Repository', `synthetic-repo-${i}`, 'x'.repeat(200)))
+    const cases = [
+      { name: 'unset', flag: undefined, rows: mixed, considered: 3, affected: 2, errors: 2, plugins: 'Repository, Branches, app_installations' },
+      { name: 'false', flag: 'false', rows: mixed, considered: 3, affected: 2, errors: 2, plugins: 'Repository, Branches, app_installations' },
+      { name: 'true', flag: 'true', rows: mixed, considered: 3, affected: 2, errors: 2, plugins: 'Repository, Branches, app_installations' },
+      { name: 'no-op', flag: 'true', rows: [], considered: 0, affected: 0, errors: 0, plugins: 'None' },
+      { name: 'multi-page', flag: 'true', rows: pages, considered: 130, affected: 130, errors: 0, plugins: plugins.join(', ') },
+      { name: 'truncated', flag: 'true', rows: [...huge, message('ERROR', 'preserved trailing error')], considered: 601, affected: 600, errors: 1, plugins: 'Repository' },
+      { name: 'comments-disabled', flag: 'true', create: 'false', rows: [], considered: 0, affected: 0, errors: 0, plugins: 'None' }
+    ]
+    const commentIds = new Set()
+    let defaultBody
+    for (const scenario of cases) {
+      env.PR_COMMENT_SUMMARY_ENABLED = scenario.flag
+      env.CREATE_PR_COMMENT = scenario.create || 'true'
+      const { data: check } = await octokit.rest.checks.create({
+        ...target, name: `Phase 27 reporting ${scenario.name}`, head_sha: file.commit.sha, status: 'in_progress'
+      })
+      log(`27: ${scenario.name} owned check run ${check.id}`)
+      requireAssertion(typeof check.html_url === 'string' && new URL(check.html_url).pathname.startsWith(`/${ORG}/${target.repo}/`),
+        `${scenario.name}: real check-run URL belongs to the owned repo`)
+      const context = {
+        payload: { installation: orgInstallation, repository: { owner: { login: ORG }, name: target.repo }, check_run: { ...check, check_suite: { pull_requests: [{ number: pr.number }] } } },
+        octokit,
+        log: { debug () {}, info: log, error: logFail }
+      }
+      const settings = new Settings(true, context, target, {}, branch)
+      settings.results = structuredClone(scenario.rows)
+      await settings.handleResults()
+      const { data: completed } = await octokit.rest.checks.get({ ...target, check_run_id: check.id })
+      requireAssertion(completed.status === 'completed' && completed.conclusion === (scenario.errors ? 'failure' : 'success'),
+        `${scenario.name}: real check completed with expected conclusion`)
+      const listed = await octokit.paginate(octokit.rest.issues.listComments, { ...target, issue_number: pr.number, per_page: 100 })
+      const comments = listed.filter(comment => !commentIds.has(comment.id))
+      for (const comment of comments) {
+        commentIds.add(comment.id)
+        log(`27: ${scenario.name} owned comment ${comment.id}, length ${comment.body.length}`)
+      }
+      if (scenario.create === 'false') {
+        requireAssertion(comments.length === 0, 'CREATE_PR_COMMENT=false posts no comment')
+        continue
+      }
+      requireAssertion(scenario.name === 'multi-page' ? comments.length > 1 : comments.length === (scenario.name === 'truncated' ? 2 : 1),
+        `${scenario.name}: expected comment page count`)
+      for (const [index, comment] of comments.entries()) {
+        const body = comment.body
+        const header = `#### :robot: Safe-Settings config changes detected${comments.length > 1 ? ` (${index + 1}/${comments.length})` : ''}:\n\n**Repos considered:** ${scenario.considered}\n**Repos affected:** ${scenario.affected}\n\n`
+        const extras = `**Errors:** ${scenario.errors} · **Plugins affected:** ${scenario.plugins}\n\nView the full per-repo breakdown: ${check.html_url}\n\n`
+        requireAssertion(body.length <= limit && body.startsWith(header + (scenario.flag === 'true' ? extras : '')),
+          `${scenario.name} page ${index + 1}: read-back body has exact operation-wide metadata within the limit`)
+        requireAssertion(scenario.flag === 'true'
+          ? body.endsWith(footer)
+          : !body.includes('**Errors:**') && !body.includes(check.html_url) && !body.includes(footer),
+        `${scenario.name} page ${index + 1}: opt-in link and unchecked footer match the flag`)
+      }
+      const combined = comments.map(comment => comment.body).join('\n')
+      if (scenario.name === 'unset') defaultBody = combined
+      if (scenario.name === 'false') requireAssertion(combined === defaultBody, 'unset and false retain byte-identical default output')
+      if (scenario.rows === mixed) {
+        requireAssertion(['controlled error one', 'controlled error two', 'controlled warning', 'controlled info']
+          .every(text => combined.split(text).length === 2), `${scenario.name}: all messages survive once`)
+      }
+      if (scenario.name === 'no-op') requireAssertion(combined.includes('_No changes to apply._'), 'no-op details remain visible')
+      if (scenario.name === 'multi-page') {
+        requireAssertion(!combined.includes('too many changes') &&
+          Array.from({ length: 130 }, (_, i) => `**synthetic-repo-${i}**`).every(text => combined.split(text).length === 4),
+        'multi-page: every repository detail survives across all three plugins')
+      }
+      if (scenario.name === 'truncated') {
+        requireAssertion(comments[0].body.length === limit && comments[0].body.endsWith(`... (too many changes to report)\n\n</details>${footer}`) &&
+          comments[0].body.match(/<\/?(?:details|summary)>/g)?.join('') === '<details><summary></summary></details>' &&
+          comments[1].body.endsWith(`* preserved trailing error\n\n</details>${footer}`),
+        'truncated: exact maximum length, closed section before footer, and trailing error preserved')
+      }
+    }
+  } catch (error) {
+    errors.push(error)
+  } finally {
+    Object.assign(env, originalFlags)
+    if (createdRepo) {
+      try {
+        await octokit.rest.repos.delete(target)
+        log('27: owned repo, PR, check runs, comments and branch removed')
+      } catch (error) {
+        logFail(`27: owned fixture cleanup failed: ${error.message}`)
+        errors.push(error)
+      }
+    }
+  }
+  if (errors.length === 1) throw errors[0]
+  if (errors.length > 1) throw new AggregateError(errors, 'Phase 27 reporting and cleanup failed')
+  log('Phase 27 complete')
+}
+
+async function phase23ConfigLoading () {
+  logPhase('Phase 23: Config loading')
+  const ConfigManager = require('./lib/configManager')
+  const env = require('./lib/env')
+  const branch = 'smoke-test-phase23'
+  const filePath = path.posix.join(CONFIG_PATH, env.SETTINGS_FILE_PATH)
+  const context = {
+    repo: () => ({ owner: ORG, repo: ADMIN_REPO }),
+    octokit,
+    log: { error: log, debug: log, info: log }
+  }
+  const manager = new ConfigManager(context, branch)
+  let created = false
+  try {
+    // Creating rather than replacing the ref protects any pre-existing branch.
+    await createBranch(ORG, ADMIN_REPO, branch)
+    created = true
+    await createOrUpdateFile(ORG, ADMIN_REPO, filePath, 'repository:\n  has_wiki: false\n', branch, '23: config loading fixture')
+    assert(JSON.stringify(await manager.loadGlobalSettingsYaml()) === JSON.stringify({ repository: { has_wiki: false } }),
+      '23: real global config is parsed from the requested branch')
+    await createOrUpdateFile(ORG, ADMIN_REPO, filePath, '# empty\n', branch, '23: empty config fixture')
+    assert(JSON.stringify(await manager.loadGlobalSettingsYaml()) === '{}', '23: empty YAML returns an empty object')
+    assert(await manager.loadYaml(CONFIG_PATH) === null, '23: real directory response returns null')
+    assert(await manager.loadYaml(path.posix.join(CONFIG_PATH, 'smoke-missing-config-23.yml')) === null,
+      '23: missing config file returns null on real HTTP 404')
+    assert(await new ConfigManager(context, `${branch}-missing`).loadGlobalSettingsYaml() === null,
+      '23: missing ref returns null on real HTTP 404')
+  } catch (error) {
+    logFail(`23: config loading failed: ${error.message}`)
+    throw error
+  } finally {
+    if (created) {
+      try {
+        await deleteBranch(ORG, ADMIN_REPO, branch)
+      } catch (error) {
+        logFail(`23: could not remove fixture branch: ${error.message}`)
+      }
+    }
+  }
+}
+
+async function phase24OrganizationSyncTargeting () {
+  logPhase('Phase 24: Organization-targeted full-sync dry run')
+  if (!assert(process.env.GH_ORG && orgInstallation?.account?.login?.toLowerCase() === ORG.toLowerCase(),
+    '24: explicit GH_ORG matches the authenticated test installation')) {
+    throw new Error('Phase 24 requires an explicitly configured and verified test organization')
+  }
+
+  const result = await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [path.join(__dirname, 'full-sync.js')], {
+      cwd: __dirname,
+      env: {
+        ...process.env,
+        GH_ORG: ORG,
+        FULL_SYNC_NOP: 'true',
+        CRON: '',
+        LOG_LEVEL: 'info'
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 120000
+    })
+    let output = ''
+    child.stdout.on('data', data => { output += data })
+    child.stderr.on('data', data => { output += data })
+    child.on('error', error => {
+      logFail(`24: could not start full-sync CLI: ${error.message}`)
+      reject(error)
+    })
+    child.on('close', (code, signal) => resolve({ code, signal, output }))
+  })
+
+  const selected = [...result.output.matchAll(/Syncing installation (\d+) on account ([A-Za-z0-9-]+)/g)]
+  assert(result.code === 0, `24: full-sync CLI exited successfully (code=${result.code}, signal=${result.signal})`)
+  assert(result.output.includes('Starting full sync with NOP=true'), '24: full-sync CLI ran in NOP mode')
+  assert(selected.length === 1 && Number(selected[0][1]) === orgInstallation.id &&
+    selected[0][2].toLowerCase() === ORG.toLowerCase(),
+  '24: sync selected exactly the authenticated test organization installation')
+  assert(result.output.includes('Full sync completed successfully.'), '24: actual full-sync entrypoint completed')
+  assert(!/Unexpected error during full sync|Fatal error during full sync|Errors occurred during full sync/.test(result.output),
+    '24: full-sync CLI reported no failure')
+}
+
+async function phase22InstallationFullSync (app, installationId) {
+  logPhase('Phase 22: Test-org installation full-sync NOP')
+  if (!process.env.GH_ORG || process.env.GH_ORG.toLowerCase() !== ORG.toLowerCase() || process.env.CRON) {
+    throw new Error('Phase 22 requires an explicit GH_ORG and CRON unset')
+  }
+  const { data: installation } = await app.octokit.rest.apps.getInstallation({ installation_id: installationId })
+  if (installation.id !== installationId || installation.target_type !== 'Organization' ||
+      installation.account?.login?.toLowerCase() !== ORG.toLowerCase()) {
+    throw new Error('Phase 22 installation does not match the authorized test organization')
+  }
+  const { data: appInfo } = await app.octokit.rest.apps.getAuthenticated()
+  const { data: admin } = await octokit.rest.repos.get({ owner: ORG, repo: ADMIN_REPO })
+  if (admin.owner.login.toLowerCase() !== ORG.toLowerCase()) {
+    throw new Error('Phase 22 admin repository owner does not match the test organization')
+  }
+
+  // Exercise real Settings and GitHub reads, but never enumerate/sync other
+  // installations. info() receives already-verified App metadata.
+  const repoClient = Object.create(octokit)
+  repoClient.rest = {
+    ...octokit.rest,
+    apps: { ...octokit.rest.apps, getAuthenticated: async () => ({ data: appInfo }) }
+  }
+  const listRoute = { url: '/app/installations', method: 'GET' }
+  const appClient = {
+    rest: { apps: { listInstallations: { endpoint: { merge: () => listRoute } } } },
+    paginate: async route => {
+      if (route !== listRoute) throw new Error('Phase 22 unexpected App request')
+      return [installation]
+    }
+  }
+  const summaries = []
+  const logger = {
+    trace: () => {},
+    debug: () => {},
+    info: message => { summaries.push(message); log(message) },
+    warn: message => log(`Warning: ${message}`),
+    error: message => logFail(`22: ${message}`)
+  }
+  const readOnlyTestOrg = options => {
+    const request = octokit.request.endpoint(options)
+    const pathname = new URL(request.url).pathname.toLowerCase().replace(/^\/api\/v3/, '')
+    const owner = ORG.toLowerCase()
+    const inOrg = pathname === `/orgs/${owner}` || pathname.startsWith(`/orgs/${owner}/`) ||
+      pathname.startsWith(`/repos/${owner}/`) || pathname === '/installation/repositories'
+    if (request.method !== 'GET' || !inOrg) {
+      throw new Error('Phase 22 blocked a non-read-only or out-of-org request')
+    }
+  }
+  octokit.hook.before('request', readOnlyTestOrg)
+  try {
+    const instance = require('./index')({
+      on: () => {},
+      log: logger,
+      auth: async id => {
+        if (id === undefined) return appClient
+        if (id !== installationId) throw new Error('Phase 22 blocked authentication outside the test organization')
+        return repoClient
+      }
+    }, {})
+    const aggregate = await instance.syncInstallation(true)
+    if (!assert(aggregate?.results?.length === 1, '22: exactly one verified installation returned a result')) return
+    const result = aggregate.results[0]
+    assert(aggregate.errors.length === 0, '22: no aggregate full-sync errors')
+    assert(result.errors.length === 0, '22: real Settings reports no errors')
+    assert(result.nop === true, '22: real Settings ran in NOP mode')
+    assert(result.installation_id === installationId, '22: Settings used the verified installation ID')
+    assert(result.repo.owner.toLowerCase() === ORG.toLowerCase(), '22: Settings used the authorized test-org owner')
+    assert(result.github === repoClient, '22: Settings used the test-org authenticated client')
+    assert(result.processedRepoNames.has(ADMIN_REPO), '22: real installation repository enumeration included the admin repo')
+    assert(summaries.filter(message => message === 'Synced 1 of 1 installation(s); 0 failed').length === 1,
+      '22: successful installation summary logged exactly once')
+  } finally {
+    octokit.hook.remove('request', readOnlyTestOrg)
+  }
+}
+
 async function main () {
+  if (process.env.CRON) {
+    throw new Error('Smoke tests require CRON unset to avoid syncing other installations')
+  }
   const { App } = await import('octokit')
   const app = new App({ appId: APP_ID, privateKey: PRIVATE_KEY })
 
@@ -3195,6 +4095,7 @@ async function main () {
     // Org/user installations key off account.login (only enterprise accounts have a slug).
     if (installation.account && installation.account.login && installation.account.login.toLowerCase() === ORG.toLowerCase()) {
       installationId = installation.id
+      orgInstallation = installation
       break
     }
   }
@@ -3253,7 +4154,16 @@ async function main () {
       ['Phase 15: Ruleset array drift', phase15RulesetArrayDrift],
       ['Phase 16: Ruleset name/slug resolution', phase16RulesetNameResolution],
       ['Phase 17: App installation management', phase17AppInstallations],
-      ['Phase 18: Team include/exclude filters', phase18TeamIncludeExclude]
+      ['Phase 18: Team include/exclude filters', phase18TeamIncludeExclude],
+      ['Phase 19: Bypass actor convergence', phase19BypassActorConvergence],
+      ['Phase 20: Custom property exclusions', phase20CustomPropertyExclusions],
+      ['Phase 21: Variable pagination', phase21VariablePagination],
+      ['Phase 22: Test-org installation full-sync NOP', () => phase22InstallationFullSync(app, installationId)],
+      ['Phase 23: Config loading', phase23ConfigLoading],
+      ['Phase 24: Organization sync targeting', phase24OrganizationSyncTargeting],
+      ['Phase 25: Archived repositories', phase25ArchivedRepositories],
+      ['Phase 26: Team slug comparisons', phase26TeamSlugComparison],
+      ['Phase 27: Opt-in PR comment summary', phase27PrCommentSummary]
     ]
 
     // When --phase is given, only run setup (phase 0) + the requested phase(s).

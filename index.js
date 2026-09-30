@@ -72,7 +72,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
         }
         const nopcommand = new NopCommand(filename, repo, null, e, 'ERROR')
         robot.log.error(`NOPCOMMAND ${JSON.stringify(nopcommand)}`)
-        Settings.handleError(nop, context, repo, deploymentConfig, ref, nopcommand)
+        await Settings.handleError(nop, context, repo, deploymentConfig, ref, nopcommand)
       } else {
         throw e
       }
@@ -425,22 +425,70 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
 
   async function syncInstallation (nop = false) {
     robot.log.trace('Fetching installations')
-    const installations = await listAllInstallations()
-
-    if (installations.length > 0) {
-      const installation = installations[0]
-      const github = await robot.auth(installation.id)
-      const context = {
-        payload: {
-          installation
-        },
-        octokit: github,
-        log: robot.log,
-        repo: () => { return { repo: env.ADMIN_REPO, owner: installation.account.login } }
+    let installations = (await listAllInstallations()).filter(installation => {
+      // Enterprise installations supply app-management credentials, not repos.
+      if (installation.target_type === 'Enterprise') {
+        robot.log.debug(`Skipping enterprise installation ${installation.id} for repository sync`)
+        return false
       }
-      return syncAllSettings(nop, context)
+      return true
+    })
+
+    if (env.GH_ORG) {
+      const installation = installations.find(i =>
+        typeof i.account?.login === 'string' && i.account.login.toLowerCase() === env.GH_ORG.toLowerCase()
+      )
+      if (!installation) {
+        const accounts = installations.map(i => i.account?.login).join(', ')
+        throw new Error(`No app installation found for GH_ORG '${env.GH_ORG}'. Installed on: [${accounts}]`)
+      }
+      installations = [installation]
     }
-    return null
+
+    if (installations.length === 0) {
+      return null
+    }
+
+    const results = []
+    const errors = []
+    let failed = 0
+
+    for (const installation of installations) {
+      try {
+        const owner = installation.account?.login
+        if (typeof owner !== 'string' || !owner.trim()) {
+          throw new Error(`Installation ${installation.id} has no account login for repository sync`)
+        }
+        robot.log.info(`Syncing installation ${installation.id} on account ${owner}`)
+        const github = await robot.auth(installation.id)
+        const context = {
+          payload: {
+            installation
+          },
+          octokit: github,
+          log: robot.log,
+          repo: () => { return { repo: env.ADMIN_REPO, owner } }
+        }
+        const result = await syncAllSettings(nop, context)
+        if (!result) {
+          // NOP configuration errors are reported without returning Settings.
+          throw new Error(`Sync of installation ${installation.id} for ${owner} returned no result`)
+        }
+        results.push(result)
+        if (result.errors?.length) {
+          failed++
+          errors.push(...result.errors)
+          robot.log.error(`Sync of installation ${installation.id} for ${owner} reported ${result.errors.length} error(s)`)
+        }
+      } catch (e) {
+        failed++
+        robot.log.error(`Failed to sync installation ${installation.id} for ${installation.account?.login}: ${e}`)
+        errors.push(e)
+      }
+    }
+
+    robot.log.info(`Synced ${installations.length - failed} of ${installations.length} installation(s); ${failed} failed`)
+    return { results, errors }
   }
 
   robot.on('push', async context => {
@@ -1054,9 +1102,14 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     # │ │ │ │ │ │
     # * * * * * *
     */
-    cron.schedule(process.env.CRON, () => {
+    cron.schedule(process.env.CRON, async () => {
       robot.log.debug('running a task every minute')
-      syncInstallation()
+      try {
+        return await syncInstallation()
+      } catch (e) {
+        robot.log.error(`Scheduled full sync failed: ${e}`)
+        throw e
+      }
     })
   }
 
