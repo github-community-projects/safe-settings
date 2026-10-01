@@ -29,6 +29,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
   // the runtime provides one.
   if (typeof getRouter === 'function') {
     setupRoutes(robot, getRouter)
+    initCache(robot)
   }
   // Initialize installation cache (env-controlled prefetch)
   initCache(robot)
