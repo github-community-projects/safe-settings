@@ -25,8 +25,11 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
   let appSlug = 'safe-settings'
 
   // Initialize all routes (static UI + API) via centralized module
-  setupRoutes(robot, getRouter)
-
+  // Full-sync runs without Probot's web router; only initialize routes when
+  // the runtime provides one.
+  if (typeof getRouter === 'function') {
+    setupRoutes(robot, getRouter)
+  }
   // Initialize installation cache (env-controlled prefetch)
   initCache(robot)
 
