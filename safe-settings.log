@@ -1,0 +1,54 @@
+2025-09-11T01:43:41.125Z [INFO] Received 'pull_request.closed' event: 45
+2025-09-11T01:43:41.125Z [INFO] Pull request closed on Safe-Settings Hub: (jefeish-training/safe-settings-config-master)
+2025-09-11T01:43:42.072Z [INFO] Files changed in PR #45: .github/safe-settings/globals/suborg.yml
+2025-09-11T01:43:42.072Z [DEBUG] Detected changes in the globals folder. Routing to syncHubGlobalsUpdate(...).
+2025-09-11T01:43:42.073Z [INFO] Syncing safe settings for 'globals/'.
+2025-09-11T01:43:42.359Z [DEBUG] Loaded manifest.yml rules from hub repo:{
+  "rules": [
+    {
+      "name": "global-defaults",
+      "targets": [
+        "*"
+      ],
+      "files": [
+        "*.yml"
+      ],
+      "mergeStrategy": "merge"
+    },
+    {
+      "name": "security-policies",
+      "targets": [
+        "acme-*",
+        "foo-bar"
+      ],
+      "files": [
+        "settings.yml"
+      ],
+      "mergeStrategy": "overwrite"
+    }
+  ]
+}
+2025-09-11T01:43:42.361Z [DEBUG] Evaluating globals file: .github/safe-settings/globals/suborg.yml
+2025-09-11T01:43:42.361Z [DEBUG] Preparing to sync file 'suborg.yml' to org 'jetest99' with mergeStrategy='merge'
+2025-09-11T01:43:42.361Z [DEBUG] Rule 'global-defaults' matches file 'suborg.yml'. Targets: jetest99, jefeish-training, jefeish-test1, copilot-for-emus, jefeish-migration-test, decyjphr-training, decyjphr-emu
+2025-09-11T01:43:42.988Z [DEBUG] Checking existence of .github/suborg.yml in jetest99/safe-settings-config
+2025-09-11T01:43:43.292Z [INFO] Skipping sync of suborg.yml to jetest99 (already exists & mergeStrategy=merge)
+2025-09-11T01:43:43.292Z [DEBUG] Found .github/suborg.yml in jetest99/safe-settings-config
+2025-09-11T01:43:43.292Z [DEBUG] Preparing to sync file 'suborg.yml' to org 'jefeish-training' with mergeStrategy='merge'
+2025-09-11T01:43:43.773Z [DEBUG] Checking existence of .github/suborg.yml in jefeish-training/safe-settings-config
+2025-09-11T01:43:44.077Z [DEBUG] Found .github/suborg.yml in jefeish-training/safe-settings-config
+2025-09-11T01:43:44.078Z [INFO] Skipping sync of suborg.yml to jefeish-training (already exists & mergeStrategy=merge)
+2025-09-11T01:43:44.078Z [DEBUG] Preparing to sync file 'suborg.yml' to org 'jefeish-test1' with mergeStrategy='merge'
+2025-09-11T01:43:44.793Z [DEBUG] Checking existence of .github/suborg.yml in jefeish-test1/safe-settings-config
+2025-09-11T01:43:45.082Z [DEBUG] Found .github/suborg.yml in jefeish-test1/safe-settings-config
+2025-09-11T01:43:45.082Z [INFO] Skipping sync of suborg.yml to jefeish-test1 (already exists & mergeStrategy=merge)
+2025-09-11T01:43:45.082Z [DEBUG] Preparing to sync file 'suborg.yml' to org 'copilot-for-emus' with mergeStrategy='merge'
+2025-09-11T01:43:45.593Z [INFO] Skipping org copilot-for-emus: config repo 'safe-settings-config' does not exist.
+2025-09-11T01:43:45.593Z [DEBUG] Preparing to sync file 'suborg.yml' to org 'jefeish-migration-test' with mergeStrategy='merge'
+2025-09-11T01:43:46.208Z [DEBUG] Checking existence of .github/suborg.yml in jefeish-migration-test/safe-settings-config
+2025-09-11T01:43:46.461Z [INFO] Skipping sync of suborg.yml to jefeish-migration-test (already exists & mergeStrategy=merge)
+2025-09-11T01:43:46.461Z [DEBUG] Found .github/suborg.yml in jefeish-migration-test/safe-settings-config
+2025-09-11T01:43:46.461Z [DEBUG] Preparing to sync file 'suborg.yml' to org 'decyjphr-training' with mergeStrategy='merge'
+2025-09-11T01:43:46.897Z [INFO] Skipping org decyjphr-training: config repo 'safe-settings-config' does not exist.
+2025-09-11T01:43:46.897Z [DEBUG] Preparing to sync file 'suborg.yml' to org 'decyjphr-emu' with mergeStrategy='merge'
+2025-09-11T01:43:47.342Z [INFO] Skipping org decyjphr-emu: config repo 'safe-settings-config' does not exist.

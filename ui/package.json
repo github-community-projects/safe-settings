@@ -1,0 +1,30 @@
+{
+  "name": "ui",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --turbopack --port 3001",
+    "build": "next build",
+    "export": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@primer/octicons-react": "^19.15.5",
+    "bootstrap": "^5.3.7",
+    "d3-drag": "^3.0.0",
+    "d3-force": "^3.0.0",
+    "d3-selection": "^3.0.0",
+    "mermaid": "^11.14.0",
+    "next": "^15.4.7",
+    "react-markdown": "^10.1.0",
+    "rehype-mermaid": "^3.0.0",
+    "swr": "^2.3.6"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@tailwindcss/postcss": "^4",
+    "eslint": "^9",
+    "eslint-config-next": "15.4.7",
+    "tailwindcss": "^4"
+  }
+}

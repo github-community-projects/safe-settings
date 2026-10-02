@@ -12,7 +12,7 @@
 name: "CodeQL Advanced"
 
 on:
-  workflow_dispatch: 
+  workflow_dispatch:
   push:
     branches: [ "main-enterprise" ]
   pull_request:
