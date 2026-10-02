@@ -2,8 +2,7 @@ const { NextResponse } = require('next/server');
 
 // JS version: no type annotations
 export async function GET(request, context) {
-  const params = context && context.params ? context.params : {};
-  const slug = params.slug || '';
+  const { slug = '' } = await context.params;
   return NextResponse.json({ message: `Hello ${slug}!` });
 }
 
