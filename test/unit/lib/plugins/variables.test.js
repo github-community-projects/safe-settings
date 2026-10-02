@@ -1,4 +1,3 @@
-const { when } = require('jest-when')
 const Variables = require('../../../../lib/plugins/variables')
 const NopCommand = require('../../../../lib/nopcommand')
 
@@ -8,13 +7,14 @@ describe('Variables', () => {
   const repo = 'test'
 
   function configure (nop = false, entries = [{ name: 'test', value: 'test' }]) {
-    const log = { debug: jest.fn(), error: console.error }
+    const log = { debug: jest.fn(), info: jest.fn(), error: console.error }
     const errors = []
     return new Variables(nop, github, { owner: org, repo }, entries, log, errors)
   }
 
   beforeEach(() => {
     github = {
+      paginate: jest.fn(),
       request: jest.fn().mockReturnValue(Promise.resolve(true))
     }
   })
@@ -28,18 +28,27 @@ describe('Variables', () => {
 
   describe('find', () => {
     it('should return only name and value fields', async () => {
-      when(github.request)
-        .calledWith('GET /repos/:org/:repo/actions/variables', { org, repo })
-        .mockResolvedValue({
-          data: {
-            variables: [{ name: 'VAR1', value: 'val1', created_at: '2024-01-01', updated_at: '2024-01-02' }]
-          }
-        })
+      github.paginate.mockResolvedValue([{ name: 'VAR1', value: 'val1', created_at: '2024-01-01', updated_at: '2024-01-02' }])
 
       const plugin = configure()
       const result = await plugin.find()
 
       expect(result).toEqual([{ name: 'VAR1', value: 'val1' }])
+      expect(github.paginate).toHaveBeenCalledWith(
+        'GET /repos/{owner}/{repo}/actions/variables',
+        { owner: org, repo, per_page: 100 },
+        expect.any(Function)
+      )
+    })
+
+    it.each([{ variables: [] }, { variables: [{ name: 'VAR1', value: 'value' }] }])('should map wrapped variable pages: %j', async ({ variables }) => {
+      github.paginate.mockImplementation(async (route, options, mapper) => mapper({ data: { variables } }))
+      expect(await configure().find()).toEqual(variables)
+    })
+
+    it('should map a page without variables to an empty array', async () => {
+      github.paginate.mockImplementation(async (route, options, mapper) => mapper({ data: {} }))
+      expect(await configure().find()).toEqual([])
     })
   })
 
@@ -59,13 +68,7 @@ describe('Variables', () => {
     it('should add new and remove stale variables', () => {
       const plugin = configure()
 
-      when(github.request)
-        .calledWith('GET /repos/:org/:repo/actions/variables', { org, repo })
-        .mockResolvedValue({
-          data: {
-            variables: [{ name: 'DELETE_ME', value: 'test' }]
-          }
-        })
+      github.paginate.mockResolvedValue([{ name: 'DELETE_ME', value: 'test' }])
 
       return plugin.sync().then(() => {
         expect(github.request).toHaveBeenCalledWith(
@@ -83,17 +86,15 @@ describe('Variables', () => {
     it('should return NopCommands and not mutate when nop is true', async () => {
       const plugin = configure(true)
 
-      when(github.request)
-        .calledWith('GET /repos/:org/:repo/actions/variables', { org, repo })
-        .mockResolvedValue({
-          data: {
-            variables: [{ name: 'EXISTING_VAR', value: 'existing-value' }]
-          }
-        })
+      github.paginate.mockResolvedValue([{ name: 'EXISTING_VAR', value: 'existing-value' }])
 
       const result = await plugin.sync()
 
-      expect(github.request).toHaveBeenCalledWith('GET /repos/:org/:repo/actions/variables', { org, repo })
+      expect(github.paginate).toHaveBeenCalledWith(
+        'GET /repos/{owner}/{repo}/actions/variables',
+        { owner: org, repo, per_page: 100 },
+        expect.any(Function)
+      )
       expect(github.request).not.toHaveBeenCalledWith(
         expect.stringMatching(/^(POST|PATCH|DELETE)/),
         expect.anything()
@@ -101,7 +102,6 @@ describe('Variables', () => {
 
       expect(Array.isArray(result)).toBe(true)
       expect(result.length).toBeGreaterThan(0)
-      // resArray contains: INFO NopCommand (flat), then [NopCommand] arrays from add/remove/update
       const flat = result.flat()
       flat.forEach(cmd => expect(cmd).toBeInstanceOf(NopCommand))
     })
@@ -109,13 +109,7 @@ describe('Variables', () => {
     it('should return NopCommand results when updating via sync', async () => {
       const plugin = configure(true, [{ name: 'TEST', value: 'new-value' }])
 
-      when(github.request)
-        .calledWith('GET /repos/:org/:repo/actions/variables', { org, repo })
-        .mockResolvedValue({
-          data: {
-            variables: [{ name: 'TEST', value: 'old-value' }]
-          }
-        })
+      github.paginate.mockResolvedValue([{ name: 'TEST', value: 'old-value' }])
 
       const result = await plugin.sync()
 

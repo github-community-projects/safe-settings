@@ -298,6 +298,7 @@ Every deployment will need an [App](https://developer.github.com/apps/).
 #### Organization Permissions
 
 - Administration: **Read & Write**
+- Custom organization roles: **Read-only**
 - Custom properties: **Admin**
 - Members: **Read & Write**
 

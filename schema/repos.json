@@ -48,6 +48,13 @@
     "validator": {
       "$ref": "#/$defs/ValidatorSettings"
     },
+    "rulesets": {
+      "description": "Repository rulesets applied to this repository",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/RulesetSettings"
+      }
+    },
     "environments": {
       "description": "Deployment environments",
       "type": "array",
@@ -56,11 +63,36 @@
       }
     },
     "custom_properties": {
-      "description": "Custom properties",
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/CustomPropertiesSettings"
-      }
+      "description": "Custom properties to enforce; exclude patterns preserve undeclared values.",
+      "oneOf": [
+        { "type": "array", "items": { "$ref": "#/$defs/CustomPropertiesSettings" } },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "anyOf": [{ "required": ["include"] }, { "required": ["exclude"] }],
+          "properties": {
+            "include": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/CustomPropertiesSettings",
+                "required": ["value"],
+                "anyOf": [{ "required": ["name"] }, { "required": ["property_name"] }]
+              }
+            },
+            "exclude": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name"],
+                "additionalProperties": false,
+                "properties": {
+                  "name": { "type": "string", "minLength": 1, "description": "Case-insensitive JavaScript regular expression, not a glob." }
+                }
+              }
+            }
+          }
+        }
+      ]
     },
     "variables": {
       "description": "Repository or org-level Actions variables",
@@ -75,7 +107,7 @@
       "description": "Repository settings",
       "allOf": [
         {
-          "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}/patch/requestBody/content/application~1json/schema"
+          "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}/patch/requestBody/content/application~1json/schema"
         },
         {
           "type": "object",
@@ -162,7 +194,7 @@
       "description": "A collaborator entry giving a specific user access to a repository.",
       "allOf": [
         {
-          "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}~1collaborators~1{username}/put/requestBody/content/application~1json/schema"
+          "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}~1collaborators~1{username}/put/requestBody/content/application~1json/schema"
         },
         {
           "type": "object",
@@ -192,20 +224,39 @@
       "description": "A team entry",
       "allOf": [
         {
-          "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.2026-03-10.json#/paths/~1orgs~1{org}~1teams/post/requestBody/content/application~1json/schema"
+          "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.2026-03-10.json#/paths/~1orgs~1{org}~1teams~1{team_slug}~1repos~1{owner}~1{repo}/put/requestBody/content/application~1json/schema"
         },
         {
           "type": "object",
+          "required": [
+            "name"
+          ],
           "properties": {
+            "name": {
+              "description": "The name (or slug) of the team to grant access to the repo.",
+              "type": "string"
+            },
+            "privacy": {
+              "description": "The level of privacy the team should have when it is created by safe-settings. The options are `secret` (visible only to organization owners and members of the team) or `closed` (visible to all members of the organization).",
+              "type": "string",
+              "enum": [
+                "secret",
+                "closed"
+              ]
+            },
+            "external_group": {
+              "description": "The display name of an external IdP group to link to this team.",
+              "type": "string"
+            },
             "exclude": {
-              "description": "You can exclude a list of repos for this team and all repos except these repos would have this team",
+              "description": "Exclude this team from repos whose names match one of these glob patterns.",
               "type": "array",
               "items": {
                 "type": "string"
               }
             },
             "include": {
-              "description": "You can include a list of repos for this team and only those repos would have this team",
+              "description": "Apply this team only to repos whose names match one of these glob patterns.",
               "type": "array",
               "items": {
                 "type": "string"
@@ -240,13 +291,21 @@
           "type": "string"
         },
         "protection": {
-          "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}~1branches~1{branch}~1protection/put/requestBody/content/application~1json/schema"
+          "anyOf": [
+            {
+              "enum": [null, {}, [], false],
+              "description": "An empty value deletes the existing branch protection"
+            },
+            {
+              "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}~1branches~1{branch}~1protection/put/requestBody/content/application~1json/schema"
+            }
+          ]
         }
       }
     },
     "AutolinkSettings": {
       "description": "An autolink reference entry",
-      "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}~1autolinks/post/requestBody/content/application~1json/schema"
+      "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}~1autolinks/post/requestBody/content/application~1json/schema"
     },
     "ValidatorSettings": {
       "description": "Repository name validation",
@@ -258,8 +317,25 @@
       }
     },
     "RulesetSettings": {
-      "description": "A ruleset entry",
-      "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.2026-03-10.json#/paths/~1orgs~1{org}~1rulesets/post/requestBody/content/application~1json/schema"
+      "description": "A repository ruleset entry",
+      "allOf": [
+        {
+          "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}~1rulesets/post/requestBody/content/application~1json/schema"
+        },
+        {
+          "properties": {
+            "conditions": {
+              "not": {
+                "anyOf": [
+                  { "required": ["repository_name"] },
+                  { "required": ["repository_id"] },
+                  { "required": ["repository_property"] }
+                ]
+              }
+            }
+          }
+        }
+      ]
     },
     "EnvironmentsSettings": {
       "description": "A deployment environment configuration entry",
@@ -316,10 +392,16 @@
       "type": "object",
       "properties": {
         "name": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
+        },
+        "property_name": {
+          "type": "string",
+          "minLength": 1
         },
         "value": {
-          "type": "string"
+          "type": ["string", "array", "null"],
+          "items": { "type": "string" }
         }
       }
     },

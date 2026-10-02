@@ -10,3 +10,5 @@
 | Configure deployment environments | [Deployment Environments](github-settings/6.%20deployment-environments.md) |
 | Configure auto-link references | [AutoLinks](github-settings/7.%20autolinks.md) |
 | Configure pre-defined labels for issues and pull requests | [Labels](github-settings/8.%20labels.md) |
+
+For information on disabling plugins, see [Disabling plugins](../README.md#disabling-plugins-disable_plugins) in the root README.

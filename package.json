@@ -19,8 +19,15 @@
     "test:unit:ci": "npm run test:unit --reporters=default --reporters=github-actions",
     "test:me": "jest ",
     "test:unit:watch": "npm run test:unit -- --watch",
-    "test:integration": "jest --roots=lib --roots=test/integration",
-    "test:integration:debug": "LOG_LEVEL=debug DEBUG=nock run-s test:integration"
+    "test:integration": "node --test --test-reporter=spec \"test/integration/**/*.test.js\"",
+    "test:integration:ci": "mkdir -p reports && node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=reports/integration-junit.xml \"test/integration/**/*.test.js\"",
+    "test:pagination": "node --test test/integration/transport/variables.test.js",
+    "test:archived": "node --test test/integration/transport/archived-repositories.test.js",
+    "test:integration:debug": "LOG_LEVEL=debug DEBUG=nock run-s test:integration",
+    "integration:live:comment-markup": "node test/live/comment-markup.js",
+    "smoke-test": "node smoke-test.js",
+    "smoke-test:interactive": "node smoke-test.js --interactive",
+    "smoke-test:phase": "node smoke-test.js --phase"
   },
   "author": "Yadhav Jayaraman",
   "license": "ISC",
@@ -29,18 +36,19 @@
     "@probot/adapter-aws-lambda-serverless": "^4.0.3",
     "deepmerge": "^4.3.1",
     "eta": "^3.5.0",
-    "js-yaml": "^5.2.2",
+    "js-yaml": "^4.1.0",
     "lodash": "^4.18.1",
     "minimatch": "^10.2.1",
     "node-cron": "^4.2.1",
     "octokit": "^5.0.2",
-    "probot": "^14.2.4",
+    "probot": "^14.3.2",
     "proxy-from-env": "^2.1.0",
     "undici": "^7.7.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.1.0",
     "@travi/any": "^3.1.2",
+    "ajv": "^8.17.1",
     "check-engine": "^1.10.1",
     "eslint": "^8.46.0",
     "eslint-config-standard": "^17.1.0",
@@ -74,6 +82,10 @@
     "reporters": [
       "default",
       "jest-junit"
+    ],
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "<rootDir>/test/integration/"
     ]
   },
   "jest-junit": {

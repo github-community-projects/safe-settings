@@ -4,6 +4,15 @@
   "description": "Schema for .github/settings.yml — org-level safe-settings configuration",
   "type": "object",
   "properties": {
+    "ruleset_scope": {
+      "type": "string",
+      "description": "Default scope for rulesets in suborg files. 'repo' (default) creates individual repository-scoped rulesets. 'org' creates organization-scoped rulesets with repository_property targeting. Can be overridden per suborg.",
+      "enum": [
+        "repo",
+        "org"
+      ],
+      "default": "repo"
+    },
     "repositories": {
       "description": "Repository settings",
       "allOf": [
@@ -36,23 +45,14 @@
               ]
             },
             "security_and_analysis": {
-              "type": "object",
+              "type": [
+                "object",
+                "null"
+              ],
               "description": "Specify which security and analysis features to enable or disable for the repository.\n\nTo use this parameter, you must have admin permissions for the repository or be an owner or security manager for the organization that owns the repository. For more information, see \"[Managing security managers in your organization](https://docs.github.com/organizations/managing-peoples-access-to-your-organization-with-roles/managing-security-managers-in-your-organization).\"\n\nFor example, to enable GitHub Advanced Security, use this data in the body of the `PATCH` request:\n`{ \"security_and_analysis\": {\"advanced_security\": { \"status\": \"enabled\" } } }`.\n\nYou can check which security and analysis features are currently enabled by using a `GET /repos/{owner}/{repo}` request.",
-              "nullable": true,
               "properties": {
                 "advanced_security": {
                   "type": "object",
-                  "description": "Use the `status` property to enable or disable GitHub Advanced Security for this repository.\nFor more information, see \"[About GitHub Advanced\nSecurity](/github/getting-started-with-github/learning-about-github/about-github-advanced-security).\"\n\nFor standalone Code Scanning or Secret Protection products, this parameter cannot be used.",
-                  "properties": {
-                    "status": {
-                      "type": "string",
-                      "description": "Can be `enabled` or `disabled`."
-                    }
-                  }
-                },
-                "code_security": {
-                  "type": "object",
-                  "description": "Use the `status` property to enable or disable GitHub Code Security for this repository.",
                   "description": "Use the `status` property to enable or disable GitHub Advanced Security for this repository.\nFor more information, see \"[About GitHub Advanced\nSecurity](/github/getting-started-with-github/learning-about-github/about-github-advanced-security).\"\n\nFor standalone Code Scanning or Secret Protection products, this parameter cannot be used.",
                   "properties": {
                     "status": {
@@ -84,16 +84,6 @@
                 "secret_scanning_push_protection": {
                   "type": "object",
                   "description": "Use the `status` property to enable or disable secret scanning push protection for this repository. For more information, see \"[Protecting pushes with secret scanning](/code-security/secret-scanning/protecting-pushes-with-secret-scanning).\"",
-                  "properties": {
-                    "status": {
-                      "type": "string",
-                      "description": "Can be `enabled` or `disabled`."
-                    }
-                  }
-                },
-                "secret_scanning_ai_detection": {
-                  "type": "object",
-                  "description": "Use the `status` property to enable or disable secret scanning AI detection for this repository. For more information, see \"[Responsible detection of generic secrets with AI](https://docs.github.com/code-security/secret-scanning/using-advanced-secret-scanning-and-push-protection-features/generic-secret-detection/responsible-ai-generic-secrets).\"",
                   "properties": {
                     "status": {
                       "type": "string",
@@ -197,6 +187,19 @@
               "type": "boolean",
               "description": "Either `true` to enable the wiki for this repository or `false` to disable it.",
               "default": true
+            },
+            "has_pull_requests": {
+              "type": "boolean",
+              "description": "Either `true` to allow pull requests for this repository or `false` to prevent pull requests.",
+              "default": true
+            },
+            "pull_request_creation_policy": {
+              "type": "string",
+              "description": "The policy that controls who can create pull requests for this repository: `all` or `collaborators_only`.",
+              "enum": [
+                "all",
+                "collaborators_only"
+              ]
             },
             "is_template": {
               "type": "boolean",
@@ -329,7 +332,7 @@
               }
             },
             "force_create": {
-              "description": "Force create the repository even if it already exists",
+              "description": "Force create the repository",
               "type": "boolean"
             },
             "template": {
@@ -386,7 +389,7 @@
             "properties": {
               "permission": {
                 "type": "string",
-                "description": "The permission to grant the collaborator. **Only valid on organization-owned repositories.** We accept the following permissions to be set: `pull`, `triage`, `push`, `maintain`, `admin` and you can also specify a custom repository role name, if the owning organization has defined any.",
+                "description": "The permission to grant the collaborator. **Only valid on organization-owned repositories.** We accept the following permissions to be set: `pull`, `triage`, `triage_plus`, `push`, `maintain`, `admin` and you can also specify a custom repository role name, if the owning organization has defined any.",
                 "default": "push"
               }
             }
@@ -425,74 +428,43 @@
           {
             "type": "object",
             "properties": {
+              "permission": {
+                "type": "string",
+                "description": "The permission to grant the team on this repository. We accept the following permissions to be set: `pull`, `triage`, `push`, `maintain`, `admin` and you can also specify a custom repository role name, if the owning organization has defined any. If no permission is specified, the team's `permission` attribute will be used to determine what permission to grant the team on this repository."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "name"
+            ],
+            "properties": {
               "name": {
-                "type": "string",
-                "description": "The name of the team."
-              },
-              "description": {
-                "type": "string",
-                "description": "The description of the team."
-              },
-              "maintainers": {
-                "type": "array",
-                "description": "List GitHub usernames for organization members who will become team maintainers.",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "repo_names": {
-                "type": "array",
-                "description": "The full name (e.g., \"organization-name/repository-name\") of repositories to add the team to.",
-                "items": {
-                  "type": "string"
-                }
+                "description": "The name (or slug) of the team to grant access to the repo.",
+                "type": "string"
               },
               "privacy": {
+                "description": "The level of privacy the team should have when it is created by safe-settings. The options are `secret` (visible only to organization owners and members of the team) or `closed` (visible to all members of the organization).",
                 "type": "string",
-                "description": "The level of privacy this team should have. The options are:  \n**For a non-nested team:**  \n * `secret` - only visible to organization owners and members of this team.  \n * `closed` - visible to all members of this organization.  \nDefault: `secret`  \n**For a parent or child team:**  \n * `closed` - visible to all members of this organization.  \nDefault for child team: `closed`",
                 "enum": [
                   "secret",
                   "closed"
                 ]
               },
-              "notification_setting": {
-                "type": "string",
-                "description": "The notification setting the team has chosen. The options are:  \n * `notifications_enabled` - team members receive notifications when the team is @mentioned.  \n * `notifications_disabled` - no one receives notifications.  \nDefault: `notifications_enabled`",
-                "enum": [
-                  "notifications_enabled",
-                  "notifications_disabled"
-                ]
+              "external_group": {
+                "description": "The display name of an external IdP group to link to this team.",
+                "type": "string"
               },
-              "permission": {
-                "type": "string",
-                "description": "**Closing down notice**. The permission that new repositories will be added to the team with when none is specified.",
-                "enum": [
-                  "pull",
-                  "push"
-                ],
-                "default": "pull"
-              },
-              "parent_team_id": {
-                "type": "integer",
-                "description": "The ID of a team to set as the parent team."
-              }
-            },
-            "required": [
-              "name"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
               "exclude": {
-                "description": "You can exclude a list of repos for this team and all repos except these repos would have this team",
+                "description": "Exclude this team from repos whose names match one of these glob patterns.",
                 "type": "array",
                 "items": {
                   "type": "string"
                 }
               },
               "include": {
-                "description": "You can include a list of repos for this team and only those repos would have this team",
+                "description": "Apply this team only to repos whose names match one of these glob patterns.",
                 "type": "array",
                 "items": {
                   "type": "string"
@@ -535,203 +507,226 @@
             "type": "string"
           },
           "protection": {
-            "type": "object",
-            "properties": {
-              "required_status_checks": {
+            "anyOf": [
+              {
+                "enum": [
+                  null,
+                  {},
+                  [],
+                  false
+                ],
+                "description": "An empty value deletes the existing branch protection"
+              },
+              {
                 "type": "object",
-                "description": "Require status checks to pass before merging. Set to `null` to disable.",
-                "nullable": true,
                 "properties": {
-                  "strict": {
-                    "type": "boolean",
-                    "description": "Require branches to be up to date before merging."
+                  "required_status_checks": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "description": "Require status checks to pass before merging. Set to `null` to disable.",
+                    "properties": {
+                      "strict": {
+                        "type": "boolean",
+                        "description": "Require branches to be up to date before merging."
+                      },
+                      "contexts": {
+                        "type": "array",
+                        "deprecated": true,
+                        "description": "**Closing down notice**: The list of status checks to require in order to merge into this branch. If any of these checks have recently been set by a particular GitHub App, they will be required to come from that app in future for the branch to merge. Use `checks` instead of `contexts` for more fine-grained control.",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "checks": {
+                        "type": "array",
+                        "description": "The list of status checks to require in order to merge into this branch.",
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "context"
+                          ],
+                          "properties": {
+                            "context": {
+                              "type": "string",
+                              "description": "The name of the required check"
+                            },
+                            "app_id": {
+                              "type": "integer",
+                              "description": "The ID of the GitHub App that must provide this check. Omit this field to automatically select the GitHub App that has recently provided this check, or any app if it was not set by a GitHub App. Pass -1 to explicitly allow any app to set the status."
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "required": [
+                      "strict",
+                      "contexts"
+                    ]
                   },
-                  "contexts": {
-                    "type": "array",
-                    "deprecated": true,
-                    "description": "**Closing down notice**: The list of status checks to require in order to merge into this branch. If any of these checks have recently been set by a particular GitHub App, they will be required to come from that app in future for the branch to merge. Use `checks` instead of `contexts` for more fine-grained control.",
-                    "items": {
-                      "type": "string"
-                    }
+                  "enforce_admins": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ],
+                    "description": "Enforce all configured restrictions for administrators. Set to `true` to enforce required status checks for repository administrators. Set to `null` to disable."
                   },
-                  "checks": {
-                    "type": "array",
-                    "description": "The list of status checks to require in order to merge into this branch.",
-                    "items": {
-                      "type": "object",
-                      "required": [
-                        "context"
-                      ],
-                      "properties": {
-                        "context": {
-                          "type": "string",
-                          "description": "The name of the required check"
-                        },
-                        "app_id": {
-                          "type": "integer",
-                          "description": "The ID of the GitHub App that must provide this check. Omit this field to automatically select the GitHub App that has recently provided this check, or any app if it was not set by a GitHub App. Pass -1 to explicitly allow any app to set the status."
+                  "required_pull_request_reviews": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "description": "Require at least one approving review on a pull request, before merging. Set to `null` to disable.",
+                    "properties": {
+                      "dismissal_restrictions": {
+                        "type": "object",
+                        "description": "Specify which users, teams, and apps can dismiss pull request reviews. Pass an empty `dismissal_restrictions` object to disable. User and team `dismissal_restrictions` are only available for organization-owned repositories. Omit this parameter for personal repositories.",
+                        "properties": {
+                          "users": {
+                            "type": "array",
+                            "description": "The list of user `login`s with dismissal access",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "teams": {
+                            "type": "array",
+                            "description": "The list of team `slug`s with dismissal access",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "apps": {
+                            "type": "array",
+                            "description": "The list of app `slug`s with dismissal access",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      },
+                      "dismiss_stale_reviews": {
+                        "type": "boolean",
+                        "description": "Set to `true` if you want to automatically dismiss approving reviews when someone pushes a new commit."
+                      },
+                      "require_code_owner_reviews": {
+                        "type": "boolean",
+                        "description": "Blocks merging pull requests until [code owners](https://docs.github.com/articles/about-code-owners/) review them."
+                      },
+                      "required_approving_review_count": {
+                        "type": "integer",
+                        "description": "Specify the number of reviewers required to approve pull requests. Use a number between 1 and 6 or 0 to not require reviewers."
+                      },
+                      "require_last_push_approval": {
+                        "type": "boolean",
+                        "description": "Whether the most recent push must be approved by someone other than the person who pushed it. Default: `false`.",
+                        "default": false
+                      },
+                      "bypass_pull_request_allowances": {
+                        "type": "object",
+                        "description": "Allow specific users, teams, or apps to bypass pull request requirements.",
+                        "properties": {
+                          "users": {
+                            "type": "array",
+                            "description": "The list of user `login`s allowed to bypass pull request requirements.",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "teams": {
+                            "type": "array",
+                            "description": "The list of team `slug`s allowed to bypass pull request requirements.",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
+                          "apps": {
+                            "type": "array",
+                            "description": "The list of app `slug`s allowed to bypass pull request requirements.",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
                         }
                       }
                     }
-                  }
-                },
-                "required": [
-                  "strict",
-                  "contexts"
-                ]
-              },
-              "enforce_admins": {
-                "type": "boolean",
-                "description": "Enforce all configured restrictions for administrators. Set to `true` to enforce required status checks for repository administrators. Set to `null` to disable.",
-                "nullable": true
-              },
-              "required_pull_request_reviews": {
-                "type": "object",
-                "description": "Require at least one approving review on a pull request, before merging. Set to `null` to disable.",
-                "nullable": true,
-                "properties": {
-                  "dismissal_restrictions": {
-                    "type": "object",
-                    "description": "Specify which users, teams, and apps can dismiss pull request reviews. Pass an empty `dismissal_restrictions` object to disable. User and team `dismissal_restrictions` are only available for organization-owned repositories. Omit this parameter for personal repositories.",
+                  },
+                  "restrictions": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "description": "Restrict who can push to the protected branch. User, app, and team `restrictions` are only available for organization-owned repositories. Set to `null` to disable.",
                     "properties": {
                       "users": {
                         "type": "array",
-                        "description": "The list of user `login`s with dismissal access",
+                        "description": "The list of user `login`s with push access",
                         "items": {
                           "type": "string"
                         }
                       },
                       "teams": {
                         "type": "array",
-                        "description": "The list of team `slug`s with dismissal access",
+                        "description": "The list of team `slug`s with push access",
                         "items": {
                           "type": "string"
                         }
                       },
                       "apps": {
                         "type": "array",
-                        "description": "The list of app `slug`s with dismissal access",
+                        "description": "The list of app `slug`s with push access",
                         "items": {
                           "type": "string"
                         }
                       }
-                    }
+                    },
+                    "required": [
+                      "users",
+                      "teams"
+                    ]
                   },
-                  "dismiss_stale_reviews": {
+                  "required_linear_history": {
                     "type": "boolean",
-                    "description": "Set to `true` if you want to automatically dismiss approving reviews when someone pushes a new commit."
+                    "description": "Enforces a linear commit Git history, which prevents anyone from pushing merge commits to a branch. Set to `true` to enforce a linear commit history. Set to `false` to disable a linear commit Git history. Your repository must allow squash merging or rebase merging before you can enable a linear commit history. Default: `false`. For more information, see \"[Requiring a linear commit history](https://docs.github.com/github/administering-a-repository/requiring-a-linear-commit-history)\" in the GitHub Help documentation."
                   },
-                  "require_code_owner_reviews": {
+                  "allow_force_pushes": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ],
+                    "description": "Permits force pushes to the protected branch by anyone with write access to the repository. Set to `true` to allow force pushes. Set to `false` or `null` to block force pushes. Default: `false`. For more information, see \"[Enabling force pushes to a protected branch](https://docs.github.com/github/administering-a-repository/enabling-force-pushes-to-a-protected-branch)\" in the GitHub Help documentation.\""
+                  },
+                  "allow_deletions": {
                     "type": "boolean",
-                    "description": "Blocks merging pull requests until [code owners](https://docs.github.com/articles/about-code-owners/) review them."
+                    "description": "Allows deletion of the protected branch by anyone with write access to the repository. Set to `false` to prevent deletion of the protected branch. Default: `false`. For more information, see \"[Enabling force pushes to a protected branch](https://docs.github.com/github/administering-a-repository/enabling-force-pushes-to-a-protected-branch)\" in the GitHub Help documentation."
                   },
-                  "required_approving_review_count": {
-                    "type": "integer",
-                    "description": "Specify the number of reviewers required to approve pull requests. Use a number between 1 and 6 or 0 to not require reviewers."
-                  },
-                  "require_last_push_approval": {
+                  "block_creations": {
                     "type": "boolean",
-                    "description": "Whether the most recent push must be approved by someone other than the person who pushed it. Default: `false`.",
+                    "description": "If set to `true`, the `restrictions` branch protection settings which limits who can push will also block pushes which create new branches, unless the push is initiated by a user, team, or app which has the ability to push. Set to `true` to restrict new branch creation. Default: `false`."
+                  },
+                  "required_conversation_resolution": {
+                    "type": "boolean",
+                    "description": "Requires all conversations on code to be resolved before a pull request can be merged into a branch that matches this rule. Set to `false` to disable. Default: `false`."
+                  },
+                  "lock_branch": {
+                    "type": "boolean",
+                    "description": "Whether to set the branch as read-only. If this is true, users will not be able to push to the branch. Default: `false`.",
                     "default": false
                   },
-                  "bypass_pull_request_allowances": {
-                    "type": "object",
-                    "description": "Allow specific users, teams, or apps to bypass pull request requirements.",
-                    "properties": {
-                      "users": {
-                        "type": "array",
-                        "description": "The list of user `login`s allowed to bypass pull request requirements.",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "teams": {
-                        "type": "array",
-                        "description": "The list of team `slug`s allowed to bypass pull request requirements.",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "apps": {
-                        "type": "array",
-                        "description": "The list of app `slug`s allowed to bypass pull request requirements.",
-                        "items": {
-                          "type": "string"
-                        }
-                      }
-                    }
-                  }
-                }
-              },
-              "restrictions": {
-                "type": "object",
-                "description": "Restrict who can push to the protected branch. User, app, and team `restrictions` are only available for organization-owned repositories. Set to `null` to disable.",
-                "nullable": true,
-                "properties": {
-                  "users": {
-                    "type": "array",
-                    "description": "The list of user `login`s with push access",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "teams": {
-                    "type": "array",
-                    "description": "The list of team `slug`s with push access",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "apps": {
-                    "type": "array",
-                    "description": "The list of app `slug`s with push access",
-                    "items": {
-                      "type": "string"
-                    }
+                  "allow_fork_syncing": {
+                    "type": "boolean",
+                    "description": "Whether users can pull changes from upstream when the branch is locked. Set to `true` to allow fork syncing. Set to `false` to prevent fork syncing. Default: `false`.",
+                    "default": false
                   }
                 },
                 "required": [
-                  "users",
-                  "teams"
+                  "required_status_checks",
+                  "enforce_admins",
+                  "required_pull_request_reviews",
+                  "restrictions"
                 ]
-              },
-              "required_linear_history": {
-                "type": "boolean",
-                "description": "Enforces a linear commit Git history, which prevents anyone from pushing merge commits to a branch. Set to `true` to enforce a linear commit history. Set to `false` to disable a linear commit Git history. Your repository must allow squash merging or rebase merging before you can enable a linear commit history. Default: `false`. For more information, see \"[Requiring a linear commit history](https://docs.github.com/github/administering-a-repository/requiring-a-linear-commit-history)\" in the GitHub Help documentation."
-              },
-              "allow_force_pushes": {
-                "type": "boolean",
-                "description": "Permits force pushes to the protected branch by anyone with write access to the repository. Set to `true` to allow force pushes. Set to `false` or `null` to block force pushes. Default: `false`. For more information, see \"[Enabling force pushes to a protected branch](https://docs.github.com/github/administering-a-repository/enabling-force-pushes-to-a-protected-branch)\" in the GitHub Help documentation.\"",
-                "nullable": true
-              },
-              "allow_deletions": {
-                "type": "boolean",
-                "description": "Allows deletion of the protected branch by anyone with write access to the repository. Set to `false` to prevent deletion of the protected branch. Default: `false`. For more information, see \"[Enabling force pushes to a protected branch](https://docs.github.com/github/administering-a-repository/enabling-force-pushes-to-a-protected-branch)\" in the GitHub Help documentation."
-              },
-              "block_creations": {
-                "type": "boolean",
-                "description": "If set to `true`, the `restrictions` branch protection settings which limits who can push will also block pushes which create new branches, unless the push is initiated by a user, team, or app which has the ability to push. Set to `true` to restrict new branch creation. Default: `false`."
-              },
-              "required_conversation_resolution": {
-                "type": "boolean",
-                "description": "Requires all conversations on code to be resolved before a pull request can be merged into a branch that matches this rule. Set to `false` to disable. Default: `false`."
-              },
-              "lock_branch": {
-                "type": "boolean",
-                "description": "Whether to set the branch as read-only. If this is true, users will not be able to push to the branch. Default: `false`.",
-                "default": false
-              },
-              "allow_fork_syncing": {
-                "type": "boolean",
-                "description": "Whether users can pull changes from upstream when the branch is locked. Set to `true` to allow fork syncing. Set to `false` to prevent fork syncing. Default: `false`.",
-                "default": false
               }
-            },
-            "required": [
-              "required_status_checks",
-              "enforce_admins",
-              "required_pull_request_reviews",
-              "restrictions"
             ]
           }
         }
@@ -816,9 +811,11 @@
               ],
               "properties": {
                 "actor_id": {
-                  "type": "integer",
-                  "nullable": true,
-                  "description": "The ID of the actor that can bypass a ruleset. Required for `Integration`, `RepositoryRole`, and `Team` actor types. If `actor_type` is `OrganizationAdmin`, `actor_id` is ignored. If `actor_type` is `DeployKey`, this should be null. `OrganizationAdmin` is not applicable for personal repositories."
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "description": "The ID of the actor that can bypass a ruleset. Required for `Integration`, `RepositoryRole`, `Team`, and `User` actor types. If `actor_type` is `OrganizationAdmin`, `actor_id` is ignored. If `actor_type` is `DeployKey`, this should be null. `OrganizationAdmin` is not applicable for personal repositories."
                 },
                 "actor_type": {
                   "type": "string",
@@ -827,7 +824,8 @@
                     "OrganizationAdmin",
                     "RepositoryRole",
                     "Team",
-                    "DeployKey"
+                    "DeployKey",
+                    "User"
                   ],
                   "description": "The type of actor that can bypass a ruleset."
                 },
@@ -840,6 +838,10 @@
                     "exempt"
                   ],
                   "default": "always"
+                },
+                "name": {
+                  "type": "string",
+                  "description": "Human-friendly alternative to `actor_id`. The team slug, username, GitHub App slug, or repository role name (resolved using `actor_type`). Cannot be combined with `actor_id`."
                 }
               }
             }
@@ -1252,6 +1254,49 @@
                           "type": "boolean",
                           "description": "New, reviewable commits pushed will dismiss previous pull request review approvals."
                         },
+                        "dismissal_restriction": {
+                          "title": "DismissalRestriction",
+                          "description": "Specify people, teams, or apps allowed to dismiss pull request reviews.",
+                          "type": "object",
+                          "properties": {
+                            "allowed_actors": {
+                              "type": "array",
+                              "description": "Specify people, teams, or apps allowed to dismiss pull request reviews.",
+                              "items": {
+                                "title": "Actor",
+                                "description": "An actor allowed to dismiss pull request reviews",
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "integer",
+                                    "description": "ID of the actor that can dismiss reviews."
+                                  },
+                                  "type": {
+                                    "type": "string",
+                                    "description": "The type of the actor",
+                                    "enum": [
+                                      "User",
+                                      "Team",
+                                      "IntegrationInstallation",
+                                      "RepositoryRole"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "type"
+                                ]
+                              }
+                            },
+                            "enabled": {
+                              "type": "boolean",
+                              "description": "Whether to restrict review dismissal to specific actors."
+                            }
+                          },
+                          "required": [
+                            "enabled"
+                          ]
+                        },
                         "require_code_owner_review": {
                           "type": "boolean",
                           "description": "Require an approving review in pull requests that modify files that have a designated code owner."
@@ -1304,10 +1349,13 @@
                                     "enum": [
                                       "Team"
                                     ]
+                                  },
+                                  "slug": {
+                                    "type": "string",
+                                    "description": "Human-friendly alternative to `id`. The slug of the team that must review changes to matching files. Cannot be combined with `id`."
                                   }
                                 },
                                 "required": [
-                                  "id",
                                   "type"
                                 ]
                               }
@@ -1978,20 +2026,113 @@
       }
     },
     "custom_properties": {
-      "description": "Custom properties",
-      "type": "array",
-      "items": {
-        "description": "A custom property entry",
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "value": {
-            "type": "string"
+      "description": "Custom properties to enforce; exclude patterns preserve undeclared values.",
+      "oneOf": [
+        {
+          "type": "array",
+          "items": {
+            "description": "A custom property entry",
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "property_name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "value": {
+                "type": [
+                  "string",
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "anyOf": [
+            {
+              "required": [
+                "include"
+              ]
+            },
+            {
+              "required": [
+                "exclude"
+              ]
+            }
+          ],
+          "properties": {
+            "include": {
+              "type": "array",
+              "items": {
+                "description": "A custom property entry",
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "property_name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "value": {
+                    "type": [
+                      "string",
+                      "array",
+                      "null"
+                    ],
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "value"
+                ],
+                "anyOf": [
+                  {
+                    "required": [
+                      "name"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "property_name"
+                    ]
+                  }
+                ]
+              }
+            },
+            "exclude": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Case-insensitive JavaScript regular expression, not a glob."
+                  }
+                }
+              }
+            }
           }
         }
-      }
+      ]
     },
     "variables": {
       "description": "Repository or org-level Actions variables",
@@ -2058,9 +2199,11 @@
               ]
             },
             "security_and_analysis": {
-              "type": "object",
+              "type": [
+                "object",
+                "null"
+              ],
               "description": "Specify which security and analysis features to enable or disable for the repository.\n\nTo use this parameter, you must have admin permissions for the repository or be an owner or security manager for the organization that owns the repository. For more information, see \"[Managing security managers in your organization](https://docs.github.com/organizations/managing-peoples-access-to-your-organization-with-roles/managing-security-managers-in-your-organization).\"\n\nFor example, to enable GitHub Advanced Security, use this data in the body of the `PATCH` request:\n`{ \"security_and_analysis\": {\"advanced_security\": { \"status\": \"enabled\" } } }`.\n\nYou can check which security and analysis features are currently enabled by using a `GET /repos/{owner}/{repo}` request.",
-              "nullable": true,
               "properties": {
                 "advanced_security": {
                   "type": "object",
@@ -2199,6 +2342,19 @@
               "description": "Either `true` to enable the wiki for this repository or `false` to disable it.",
               "default": true
             },
+            "has_pull_requests": {
+              "type": "boolean",
+              "description": "Either `true` to allow pull requests for this repository or `false` to prevent pull requests.",
+              "default": true
+            },
+            "pull_request_creation_policy": {
+              "type": "string",
+              "description": "The policy that controls who can create pull requests for this repository: `all` or `collaborators_only`.",
+              "enum": [
+                "all",
+                "collaborators_only"
+              ]
+            },
             "is_template": {
               "type": "boolean",
               "description": "Either `true` to make this repo available as a template repository or `false` to prevent it.",
@@ -2330,7 +2486,7 @@
               }
             },
             "force_create": {
-              "description": "Force create the repository even if it already exists",
+              "description": "Force create the repository",
               "type": "boolean"
             },
             "template": {
@@ -2384,7 +2540,7 @@
           "properties": {
             "permission": {
               "type": "string",
-              "description": "The permission to grant the collaborator. **Only valid on organization-owned repositories.** We accept the following permissions to be set: `pull`, `triage`, `push`, `maintain`, `admin` and you can also specify a custom repository role name, if the owning organization has defined any.",
+              "description": "The permission to grant the collaborator. **Only valid on organization-owned repositories.** We accept the following permissions to be set: `pull`, `triage`, `triage_plus`, `push`, `maintain`, `admin` and you can also specify a custom repository role name, if the owning organization has defined any.",
               "default": "push"
             }
           }
@@ -2419,65 +2575,43 @@
         {
           "type": "object",
           "properties": {
+            "permission": {
+              "type": "string",
+              "description": "The permission to grant the team on this repository. We accept the following permissions to be set: `pull`, `triage`, `push`, `maintain`, `admin` and you can also specify a custom repository role name, if the owning organization has defined any. If no permission is specified, the team's `permission` attribute will be used to determine what permission to grant the team on this repository."
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "name"
+          ],
+          "properties": {
             "name": {
-              "type": "string",
-              "description": "The name of the team."
-            },
-            "description": {
-              "type": "string",
-              "description": "The description of the team."
-            },
-            "maintainers": {
-              "type": "array",
-              "description": "List GitHub usernames for organization members who will become team maintainers.",
-              "items": {
-                "type": "string"
-              }
-            },
-            "repo_names": {
-              "type": "array",
-              "description": "The full name (e.g., \"organization-name/repository-name\") of repositories to add the team to.",
-              "items": {
-                "type": "string"
-              }
+              "description": "The name (or slug) of the team to grant access to the repo.",
+              "type": "string"
             },
             "privacy": {
+              "description": "The level of privacy the team should have when it is created by safe-settings. The options are `secret` (visible only to organization owners and members of the team) or `closed` (visible to all members of the organization).",
               "type": "string",
-              "description": "The level of privacy this team should have. The options are:  \n**For a non-nested team:**  \n * `secret` - only visible to organization owners and members of this team.  \n * `closed` - visible to all members of this organization.  \nDefault: `secret`  \n**For a parent or child team:**  \n * `closed` - visible to all members of this organization.  \nDefault for child team: `closed`",
               "enum": [
                 "secret",
                 "closed"
               ]
             },
-            "notification_setting": {
-              "type": "string",
-              "description": "The notification setting the team has chosen. The options are:  \n * `notifications_enabled` - team members receive notifications when the team is @mentioned.  \n * `notifications_disabled` - no one receives notifications.  \nDefault: `notifications_enabled`",
-              "enum": [
-                "notifications_enabled",
-                "notifications_disabled"
-              ]
+            "external_group": {
+              "description": "The display name of an external IdP group to link to this team.",
+              "type": "string"
             },
-            "parent_team_id": {
-              "type": "integer",
-              "description": "The ID of a team to set as the parent team."
-            }
-          },
-          "required": [
-            "name"
-          ]
-        },
-        {
-          "type": "object",
-          "properties": {
             "exclude": {
-              "description": "You can exclude a list of repos for this team and all repos except these repos would have this team",
+              "description": "Exclude this team from repos whose names match one of these glob patterns.",
               "type": "array",
               "items": {
                 "type": "string"
               }
             },
             "include": {
-              "description": "You can include a list of repos for this team and only those repos would have this team",
+              "description": "Apply this team only to repos whose names match one of these glob patterns.",
               "type": "array",
               "items": {
                 "type": "string"
@@ -2512,203 +2646,226 @@
           "type": "string"
         },
         "protection": {
-          "type": "object",
-          "properties": {
-            "required_status_checks": {
+          "anyOf": [
+            {
+              "enum": [
+                null,
+                {},
+                [],
+                false
+              ],
+              "description": "An empty value deletes the existing branch protection"
+            },
+            {
               "type": "object",
-              "description": "Require status checks to pass before merging. Set to `null` to disable.",
-              "nullable": true,
               "properties": {
-                "strict": {
-                  "type": "boolean",
-                  "description": "Require branches to be up to date before merging."
+                "required_status_checks": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "description": "Require status checks to pass before merging. Set to `null` to disable.",
+                  "properties": {
+                    "strict": {
+                      "type": "boolean",
+                      "description": "Require branches to be up to date before merging."
+                    },
+                    "contexts": {
+                      "type": "array",
+                      "deprecated": true,
+                      "description": "**Closing down notice**: The list of status checks to require in order to merge into this branch. If any of these checks have recently been set by a particular GitHub App, they will be required to come from that app in future for the branch to merge. Use `checks` instead of `contexts` for more fine-grained control.",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "checks": {
+                      "type": "array",
+                      "description": "The list of status checks to require in order to merge into this branch.",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "context"
+                        ],
+                        "properties": {
+                          "context": {
+                            "type": "string",
+                            "description": "The name of the required check"
+                          },
+                          "app_id": {
+                            "type": "integer",
+                            "description": "The ID of the GitHub App that must provide this check. Omit this field to automatically select the GitHub App that has recently provided this check, or any app if it was not set by a GitHub App. Pass -1 to explicitly allow any app to set the status."
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "required": [
+                    "strict",
+                    "contexts"
+                  ]
                 },
-                "contexts": {
-                  "type": "array",
-                  "deprecated": true,
-                  "description": "**Closing down notice**: The list of status checks to require in order to merge into this branch. If any of these checks have recently been set by a particular GitHub App, they will be required to come from that app in future for the branch to merge. Use `checks` instead of `contexts` for more fine-grained control.",
-                  "items": {
-                    "type": "string"
-                  }
+                "enforce_admins": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ],
+                  "description": "Enforce all configured restrictions for administrators. Set to `true` to enforce required status checks for repository administrators. Set to `null` to disable."
                 },
-                "checks": {
-                  "type": "array",
-                  "description": "The list of status checks to require in order to merge into this branch.",
-                  "items": {
-                    "type": "object",
-                    "required": [
-                      "context"
-                    ],
-                    "properties": {
-                      "context": {
-                        "type": "string",
-                        "description": "The name of the required check"
-                      },
-                      "app_id": {
-                        "type": "integer",
-                        "description": "The ID of the GitHub App that must provide this check. Omit this field to automatically select the GitHub App that has recently provided this check, or any app if it was not set by a GitHub App. Pass -1 to explicitly allow any app to set the status."
+                "required_pull_request_reviews": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "description": "Require at least one approving review on a pull request, before merging. Set to `null` to disable.",
+                  "properties": {
+                    "dismissal_restrictions": {
+                      "type": "object",
+                      "description": "Specify which users, teams, and apps can dismiss pull request reviews. Pass an empty `dismissal_restrictions` object to disable. User and team `dismissal_restrictions` are only available for organization-owned repositories. Omit this parameter for personal repositories.",
+                      "properties": {
+                        "users": {
+                          "type": "array",
+                          "description": "The list of user `login`s with dismissal access",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "teams": {
+                          "type": "array",
+                          "description": "The list of team `slug`s with dismissal access",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "apps": {
+                          "type": "array",
+                          "description": "The list of app `slug`s with dismissal access",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "dismiss_stale_reviews": {
+                      "type": "boolean",
+                      "description": "Set to `true` if you want to automatically dismiss approving reviews when someone pushes a new commit."
+                    },
+                    "require_code_owner_reviews": {
+                      "type": "boolean",
+                      "description": "Blocks merging pull requests until [code owners](https://docs.github.com/articles/about-code-owners/) review them."
+                    },
+                    "required_approving_review_count": {
+                      "type": "integer",
+                      "description": "Specify the number of reviewers required to approve pull requests. Use a number between 1 and 6 or 0 to not require reviewers."
+                    },
+                    "require_last_push_approval": {
+                      "type": "boolean",
+                      "description": "Whether the most recent push must be approved by someone other than the person who pushed it. Default: `false`.",
+                      "default": false
+                    },
+                    "bypass_pull_request_allowances": {
+                      "type": "object",
+                      "description": "Allow specific users, teams, or apps to bypass pull request requirements.",
+                      "properties": {
+                        "users": {
+                          "type": "array",
+                          "description": "The list of user `login`s allowed to bypass pull request requirements.",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "teams": {
+                          "type": "array",
+                          "description": "The list of team `slug`s allowed to bypass pull request requirements.",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "apps": {
+                          "type": "array",
+                          "description": "The list of app `slug`s allowed to bypass pull request requirements.",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
                       }
                     }
                   }
-                }
-              },
-              "required": [
-                "strict",
-                "contexts"
-              ]
-            },
-            "enforce_admins": {
-              "type": "boolean",
-              "description": "Enforce all configured restrictions for administrators. Set to `true` to enforce required status checks for repository administrators. Set to `null` to disable.",
-              "nullable": true
-            },
-            "required_pull_request_reviews": {
-              "type": "object",
-              "description": "Require at least one approving review on a pull request, before merging. Set to `null` to disable.",
-              "nullable": true,
-              "properties": {
-                "dismissal_restrictions": {
-                  "type": "object",
-                  "description": "Specify which users, teams, and apps can dismiss pull request reviews. Pass an empty `dismissal_restrictions` object to disable. User and team `dismissal_restrictions` are only available for organization-owned repositories. Omit this parameter for personal repositories.",
+                },
+                "restrictions": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "description": "Restrict who can push to the protected branch. User, app, and team `restrictions` are only available for organization-owned repositories. Set to `null` to disable.",
                   "properties": {
                     "users": {
                       "type": "array",
-                      "description": "The list of user `login`s with dismissal access",
+                      "description": "The list of user `login`s with push access",
                       "items": {
                         "type": "string"
                       }
                     },
                     "teams": {
                       "type": "array",
-                      "description": "The list of team `slug`s with dismissal access",
+                      "description": "The list of team `slug`s with push access",
                       "items": {
                         "type": "string"
                       }
                     },
                     "apps": {
                       "type": "array",
-                      "description": "The list of app `slug`s with dismissal access",
+                      "description": "The list of app `slug`s with push access",
                       "items": {
                         "type": "string"
                       }
                     }
-                  }
+                  },
+                  "required": [
+                    "users",
+                    "teams"
+                  ]
                 },
-                "dismiss_stale_reviews": {
+                "required_linear_history": {
                   "type": "boolean",
-                  "description": "Set to `true` if you want to automatically dismiss approving reviews when someone pushes a new commit."
+                  "description": "Enforces a linear commit Git history, which prevents anyone from pushing merge commits to a branch. Set to `true` to enforce a linear commit history. Set to `false` to disable a linear commit Git history. Your repository must allow squash merging or rebase merging before you can enable a linear commit history. Default: `false`. For more information, see \"[Requiring a linear commit history](https://docs.github.com/github/administering-a-repository/requiring-a-linear-commit-history)\" in the GitHub Help documentation."
                 },
-                "require_code_owner_reviews": {
+                "allow_force_pushes": {
+                  "type": [
+                    "boolean",
+                    "null"
+                  ],
+                  "description": "Permits force pushes to the protected branch by anyone with write access to the repository. Set to `true` to allow force pushes. Set to `false` or `null` to block force pushes. Default: `false`. For more information, see \"[Enabling force pushes to a protected branch](https://docs.github.com/github/administering-a-repository/enabling-force-pushes-to-a-protected-branch)\" in the GitHub Help documentation.\""
+                },
+                "allow_deletions": {
                   "type": "boolean",
-                  "description": "Blocks merging pull requests until [code owners](https://docs.github.com/articles/about-code-owners/) review them."
+                  "description": "Allows deletion of the protected branch by anyone with write access to the repository. Set to `false` to prevent deletion of the protected branch. Default: `false`. For more information, see \"[Enabling force pushes to a protected branch](https://docs.github.com/github/administering-a-repository/enabling-force-pushes-to-a-protected-branch)\" in the GitHub Help documentation."
                 },
-                "required_approving_review_count": {
-                  "type": "integer",
-                  "description": "Specify the number of reviewers required to approve pull requests. Use a number between 1 and 6 or 0 to not require reviewers."
-                },
-                "require_last_push_approval": {
+                "block_creations": {
                   "type": "boolean",
-                  "description": "Whether the most recent push must be approved by someone other than the person who pushed it. Default: `false`.",
+                  "description": "If set to `true`, the `restrictions` branch protection settings which limits who can push will also block pushes which create new branches, unless the push is initiated by a user, team, or app which has the ability to push. Set to `true` to restrict new branch creation. Default: `false`."
+                },
+                "required_conversation_resolution": {
+                  "type": "boolean",
+                  "description": "Requires all conversations on code to be resolved before a pull request can be merged into a branch that matches this rule. Set to `false` to disable. Default: `false`."
+                },
+                "lock_branch": {
+                  "type": "boolean",
+                  "description": "Whether to set the branch as read-only. If this is true, users will not be able to push to the branch. Default: `false`.",
                   "default": false
                 },
-                "bypass_pull_request_allowances": {
-                  "type": "object",
-                  "description": "Allow specific users, teams, or apps to bypass pull request requirements.",
-                  "properties": {
-                    "users": {
-                      "type": "array",
-                      "description": "The list of user `login`s allowed to bypass pull request requirements.",
-                      "items": {
-                        "type": "string"
-                      }
-                    },
-                    "teams": {
-                      "type": "array",
-                      "description": "The list of team `slug`s allowed to bypass pull request requirements.",
-                      "items": {
-                        "type": "string"
-                      }
-                    },
-                    "apps": {
-                      "type": "array",
-                      "description": "The list of app `slug`s allowed to bypass pull request requirements.",
-                      "items": {
-                        "type": "string"
-                      }
-                    }
-                  }
-                }
-              }
-            },
-            "restrictions": {
-              "type": "object",
-              "description": "Restrict who can push to the protected branch. User, app, and team `restrictions` are only available for organization-owned repositories. Set to `null` to disable.",
-              "nullable": true,
-              "properties": {
-                "users": {
-                  "type": "array",
-                  "description": "The list of user `login`s with push access",
-                  "items": {
-                    "type": "string"
-                  }
-                },
-                "teams": {
-                  "type": "array",
-                  "description": "The list of team `slug`s with push access",
-                  "items": {
-                    "type": "string"
-                  }
-                },
-                "apps": {
-                  "type": "array",
-                  "description": "The list of app `slug`s with push access",
-                  "items": {
-                    "type": "string"
-                  }
+                "allow_fork_syncing": {
+                  "type": "boolean",
+                  "description": "Whether users can pull changes from upstream when the branch is locked. Set to `true` to allow fork syncing. Set to `false` to prevent fork syncing. Default: `false`.",
+                  "default": false
                 }
               },
               "required": [
-                "users",
-                "teams"
+                "required_status_checks",
+                "enforce_admins",
+                "required_pull_request_reviews",
+                "restrictions"
               ]
-            },
-            "required_linear_history": {
-              "type": "boolean",
-              "description": "Enforces a linear commit Git history, which prevents anyone from pushing merge commits to a branch. Set to `true` to enforce a linear commit history. Set to `false` to disable a linear commit Git history. Your repository must allow squash merging or rebase merging before you can enable a linear commit history. Default: `false`. For more information, see \"[Requiring a linear commit history](https://docs.github.com/github/administering-a-repository/requiring-a-linear-commit-history)\" in the GitHub Help documentation."
-            },
-            "allow_force_pushes": {
-              "type": "boolean",
-              "description": "Permits force pushes to the protected branch by anyone with write access to the repository. Set to `true` to allow force pushes. Set to `false` or `null` to block force pushes. Default: `false`. For more information, see \"[Enabling force pushes to a protected branch](https://docs.github.com/github/administering-a-repository/enabling-force-pushes-to-a-protected-branch)\" in the GitHub Help documentation.\"",
-              "nullable": true
-            },
-            "allow_deletions": {
-              "type": "boolean",
-              "description": "Allows deletion of the protected branch by anyone with write access to the repository. Set to `false` to prevent deletion of the protected branch. Default: `false`. For more information, see \"[Enabling force pushes to a protected branch](https://docs.github.com/github/administering-a-repository/enabling-force-pushes-to-a-protected-branch)\" in the GitHub Help documentation."
-            },
-            "block_creations": {
-              "type": "boolean",
-              "description": "If set to `true`, the `restrictions` branch protection settings which limits who can push will also block pushes which create new branches, unless the push is initiated by a user, team, or app which has the ability to push. Set to `true` to restrict new branch creation. Default: `false`."
-            },
-            "required_conversation_resolution": {
-              "type": "boolean",
-              "description": "Requires all conversations on code to be resolved before a pull request can be merged into a branch that matches this rule. Set to `false` to disable. Default: `false`."
-            },
-            "lock_branch": {
-              "type": "boolean",
-              "description": "Whether to set the branch as read-only. If this is true, users will not be able to push to the branch. Default: `false`.",
-              "default": false
-            },
-            "allow_fork_syncing": {
-              "type": "boolean",
-              "description": "Whether users can pull changes from upstream when the branch is locked. Set to `true` to allow fork syncing. Set to `false` to prevent fork syncing. Default: `false`.",
-              "default": false
             }
-          },
-          "required": [
-            "required_status_checks",
-            "enforce_admins",
-            "required_pull_request_reviews",
-            "restrictions"
           ]
         }
       }
@@ -2785,9 +2942,11 @@
             ],
             "properties": {
               "actor_id": {
-                "type": "integer",
-                "nullable": true,
-                "description": "The ID of the actor that can bypass a ruleset. Required for `Integration`, `RepositoryRole`, and `Team` actor types. If `actor_type` is `OrganizationAdmin`, `actor_id` is ignored. If `actor_type` is `DeployKey`, this should be null. `OrganizationAdmin` is not applicable for personal repositories."
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "The ID of the actor that can bypass a ruleset. Required for `Integration`, `RepositoryRole`, `Team`, and `User` actor types. If `actor_type` is `OrganizationAdmin`, `actor_id` is ignored. If `actor_type` is `DeployKey`, this should be null. `OrganizationAdmin` is not applicable for personal repositories."
               },
               "actor_type": {
                 "type": "string",
@@ -2796,7 +2955,8 @@
                   "OrganizationAdmin",
                   "RepositoryRole",
                   "Team",
-                  "DeployKey"
+                  "DeployKey",
+                  "User"
                 ],
                 "description": "The type of actor that can bypass a ruleset."
               },
@@ -2809,6 +2969,10 @@
                   "exempt"
                 ],
                 "default": "always"
+              },
+              "name": {
+                "type": "string",
+                "description": "Human-friendly alternative to `actor_id`. The team slug, username, GitHub App slug, or repository role name (resolved using `actor_type`). Cannot be combined with `actor_id`."
               }
             }
           }
@@ -3221,6 +3385,49 @@
                         "type": "boolean",
                         "description": "New, reviewable commits pushed will dismiss previous pull request review approvals."
                       },
+                      "dismissal_restriction": {
+                        "title": "DismissalRestriction",
+                        "description": "Specify people, teams, or apps allowed to dismiss pull request reviews.",
+                        "type": "object",
+                        "properties": {
+                          "allowed_actors": {
+                            "type": "array",
+                            "description": "Specify people, teams, or apps allowed to dismiss pull request reviews.",
+                            "items": {
+                              "title": "Actor",
+                              "description": "An actor allowed to dismiss pull request reviews",
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "integer",
+                                  "description": "ID of the actor that can dismiss reviews."
+                                },
+                                "type": {
+                                  "type": "string",
+                                  "description": "The type of the actor",
+                                  "enum": [
+                                    "User",
+                                    "Team",
+                                    "IntegrationInstallation",
+                                    "RepositoryRole"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "type"
+                              ]
+                            }
+                          },
+                          "enabled": {
+                            "type": "boolean",
+                            "description": "Whether to restrict review dismissal to specific actors."
+                          }
+                        },
+                        "required": [
+                          "enabled"
+                        ]
+                      },
                       "require_code_owner_review": {
                         "type": "boolean",
                         "description": "Require an approving review in pull requests that modify files that have a designated code owner."
@@ -3273,10 +3480,13 @@
                                   "enum": [
                                     "Team"
                                   ]
+                                },
+                                "slug": {
+                                  "type": "string",
+                                  "description": "Human-friendly alternative to `id`. The slug of the team that must review changes to matching files. Cannot be combined with `id`."
                                 }
                               },
                               "required": [
-                                "id",
                                 "type"
                               ]
                             }
@@ -3946,10 +4156,22 @@
       "type": "object",
       "properties": {
         "name": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
+        },
+        "property_name": {
+          "type": "string",
+          "minLength": 1
         },
         "value": {
-          "type": "string"
+          "type": [
+            "string",
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
@@ -3978,6 +4200,151 @@
             "selected"
           ]
         }
+      }
+    },
+    "custom_repository_roles": {
+      "description": "Org-level custom repository roles. Only valid in the org-level settings.yml.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "base_role",
+          "permissions"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The name of the custom role."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A short description of the role."
+          },
+          "base_role": {
+            "type": "string",
+            "enum": [
+              "read",
+              "triage",
+              "write",
+              "maintain"
+            ],
+            "description": "The system role from which this role inherits permissions."
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Additional fine-grained permissions included in this role."
+          }
+        }
+      }
+    },
+    "app_installations": {
+      "description": "Manage which repositories a GitHub App installation can access. The target is a GitHub App installation rather than a repository. Repo selection follows the config hierarchy: org-level settings.yml selects all repos in the org; suborgs/*.yml selects repos by the suborg's targeting criteria; repos/*.yml adds the specific repo. Requires safe-settings to be installed on the enterprise with 'Enterprise organization installations' permission.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "app_slug"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "app_slug": {
+            "type": "string",
+            "description": "The slug of the GitHub App installation to manage."
+          }
+        }
+      }
+    },
+    "additive_plugins": {
+      "description": "List of plugins to run in additive mode. In additive mode the plugin will only add and update entries; it will never call remove(), so items that exist on GitHub but are absent from the YAML are preserved. Supported plugins: labels, collaborators, teams, milestones, autolinks, environments, custom_properties, variables, rulesets, custom_repository_roles, app_installations. Declare only in settings.yml (org level) to keep behavior consistent across all repos.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "labels",
+          "collaborators",
+          "teams",
+          "milestones",
+          "autolinks",
+          "environments",
+          "custom_properties",
+          "variables",
+          "rulesets",
+          "custom_repository_roles",
+          "app_installations"
+        ]
+      }
+    },
+    "disable_plugins": {
+      "description": "List of plugins to disable at this configuration layer. Each entry is either a plugin name (string shorthand, equivalent to target: all) or an object {plugin, target}. target=self disables the plugin at this layer only; target=children disables it at all lower layers; target=all disables it at this layer and all lower layers. Cascade is union-only; lower layers cannot re-enable a disabled plugin.",
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "string",
+            "enum": [
+              "repository",
+              "labels",
+              "collaborators",
+              "teams",
+              "milestones",
+              "branches",
+              "autolinks",
+              "validator",
+              "rulesets",
+              "environments",
+              "custom_properties",
+              "custom_repository_roles",
+              "variables",
+              "archive",
+              "app_installations"
+            ]
+          },
+          {
+            "type": "object",
+            "required": [
+              "plugin"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "plugin": {
+                "type": "string",
+                "enum": [
+                  "repository",
+                  "labels",
+                  "collaborators",
+                  "teams",
+                  "milestones",
+                  "branches",
+                  "autolinks",
+                  "validator",
+                  "rulesets",
+                  "environments",
+                  "custom_properties",
+                  "custom_repository_roles",
+                  "variables",
+                  "archive",
+                  "app_installations"
+                ]
+              },
+              "target": {
+                "type": "string",
+                "enum": [
+                  "self",
+                  "children",
+                  "all"
+                ],
+                "default": "all"
+              }
+            }
+          }
+        ]
       }
     }
   }

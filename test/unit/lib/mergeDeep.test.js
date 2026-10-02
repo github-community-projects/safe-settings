@@ -4,6 +4,210 @@ const YAML = require('js-yaml')
 const log = require('pino')('test.log')
 
 describe('MergeDeep Test', () => {
+  describe('bypass actor comparison', () => {
+    const mergeDeep = new MergeDeep(log, jest.fn())
+    const actor = (actorType, actorId, bypassMode = 'always') => ({
+      actor_type: actorType,
+      ...(actorId === undefined ? {} : { actor_id: actorId }),
+      bypass_mode: bypassMode
+    })
+    const admin = actor('OrganizationAdmin', null)
+    const deployKey = actor('DeployKey', null)
+    const app = actor('Integration', 210920)
+
+    it.each([
+      ['empty ruleset', [], [admin], [admin]],
+      ['existing app', [app], [app, admin], [admin]],
+      ['distinct null-id actor', [admin], [admin, deployKey], [deployKey]]
+    ])('adds a null-id actor to %s', (_label, target, source, additions) => {
+      expect(mergeDeep.compareDeep({ bypass_actors: target }, { bypass_actors: source })).toStrictEqual({
+        additions: { bypass_actors: additions }, modifications: {}, deletions: {}, hasChanges: true
+      })
+    })
+
+    it.each([
+      [[admin], [admin]],
+      [[app, admin], [app, admin]],
+      [[admin, deployKey, app], [app, deployKey, admin]]
+    ])('converges with distinct null-id and real-id actors %p', (target, source) => {
+      expect(mergeDeep.compareDeep({ bypass_actors: target }, { bypass_actors: source })).toStrictEqual({
+        additions: {}, modifications: {}, deletions: {}, hasChanges: false
+      })
+    })
+
+    describe.each(['OrganizationAdmin', 'DeployKey'])('%s ignores actor_id', actorType => {
+      const ids = [undefined, null, 1, 2]
+      it.each(ids.flatMap(live => ids.map(config => [live, config])))('converges for live %p and configured %p without mutation', (liveId, configId) => {
+        const target = Object.freeze({ bypass_actors: Object.freeze([Object.freeze(actor(actorType, liveId))]) })
+        const source = Object.freeze({ bypass_actors: Object.freeze([Object.freeze(actor(actorType, configId))]) })
+        const before = structuredClone({ target, source })
+
+        expect(mergeDeep.compareDeep(target, source)).toStrictEqual({
+          additions: {}, modifications: {}, deletions: {}, hasChanges: false
+        })
+        expect({ target, source }).toEqual(before)
+      })
+
+      it('reports real bypass_mode changes with the actor type as identity', () => {
+        expect(mergeDeep.compareDeep(
+          { bypass_actors: [actor(actorType, null)] },
+          { bypass_actors: [actor(actorType, 1, 'pull_request')] }
+        )).toStrictEqual({
+          additions: {},
+          modifications: { bypass_actors: [{ actor_type: actorType, bypass_mode: 'pull_request' }] },
+          deletions: {},
+          hasChanges: true
+        })
+      })
+    })
+
+    it('deletes only the removed null-id actor', () => {
+      expect(mergeDeep.compareDeep(
+        { bypass_actors: [deployKey, admin, app] },
+        { bypass_actors: [app, actor('OrganizationAdmin', 1)] }
+      )).toStrictEqual({
+        additions: {}, modifications: {}, deletions: { bypass_actors: [deployKey] }, hasChanges: true
+      })
+    })
+
+    it.each(['Team', 'Integration', 'RepositoryRole', 'User'])('preserves real %s id changes and distinct actors of the same type', actorType => {
+      const unchanged = actor(actorType, 7)
+      const removed = actor(actorType, 42)
+      const added = actor(actorType, 99)
+      expect(mergeDeep.compareDeep(
+        { bypass_actors: [removed, unchanged, admin] },
+        { bypass_actors: [actor('OrganizationAdmin', 1), unchanged, added] }
+      )).toStrictEqual({
+        additions: { bypass_actors: [added] }, modifications: {}, deletions: { bypass_actors: [removed] }, hasChanges: true
+      })
+      expect(mergeDeep.compareDeep(actor(actorType, null), removed)).toStrictEqual({
+        additions: {}, modifications: { actor_id: 42 }, deletions: {}, hasChanges: true
+      })
+    })
+
+    it('preserves name precedence for non-bypass objects', () => {
+      expect(mergeDeep.compareDeep(
+        [{ name: 'policy', actor_id: 1, type: 'old' }],
+        [{ name: 'policy', actor_id: 2, type: 'new' }]
+      )).toStrictEqual({
+        additions: [], modifications: [{ name: 'policy', actor_id: 2, type: 'new' }], deletions: [], hasChanges: true
+      })
+    })
+  })
+
+  describe('compareDeep result shape', () => {
+    const existing = { name: 'existing', enforcement: 'active' }
+    const added = { name: 'new', enforcement: 'active' }
+    const updated = { name: 'existing', enforcement: 'disabled' }
+
+    it.each([
+      ['first entry', [], [added], [added], [], [], true],
+      ['undefined target', undefined, [added], [added], [], [], true],
+      ['null target', null, [added], [added], [], [], true],
+      ['empty object target', {}, [added], [added], [], [], true],
+      ['empty arrays', [], [], [], [], [], false],
+      ['undefined target and empty source', undefined, [], [], [], [], true],
+      ['null target and empty source', null, [], [], [], [], true],
+      ['empty object and empty array', {}, [], [], [], [], false],
+      ['unchanged entries', [existing], [existing], [], [], [], false],
+      ['reordered entries', [existing, added], [added, existing], [], [], [], false],
+      ['subsequent entry', [existing], [existing, added], [added], [], [], true],
+      ['modified entry', [existing], [updated], [], [updated], [], true],
+      ['deleted entry', [existing], [], [], [], [existing], true],
+      ['replacement entry', [existing], [added], [added], [], [existing], true],
+      ['primitive entries', ['a'], ['a', 'b'], ['b'], [], [], true]
+    ])('returns array buckets for %s', (_name, target, source, additions, modifications, deletions, hasChanges) => {
+      const mergeDeep = new MergeDeep(log, jest.fn())
+
+      expect(mergeDeep.compareDeep(target, source)).toStrictEqual({
+        additions, modifications, deletions, hasChanges
+      })
+    })
+
+    it.each([undefined, null, {}, []])('preserves object additions with an empty target %p', target => {
+      const source = { name: 'policy', enabled: false, count: 0, rules: [added] }
+      const mergeDeep = new MergeDeep(log, jest.fn())
+
+      expect(mergeDeep.compareDeep(target, source)).toStrictEqual({
+        additions: source,
+        modifications: {},
+        deletions: {},
+        hasChanges: true
+      })
+    })
+
+    it('does not treat omitted object metadata as deletions', () => {
+      const mergeDeep = new MergeDeep(log, jest.fn())
+
+      expect(mergeDeep.compareDeep({ name: 'policy', id: 42 }, { name: 'policy' })).toStrictEqual({
+        additions: {}, modifications: {}, deletions: {}, hasChanges: false
+      })
+      expect(mergeDeep.compareDeep({}, {})).toStrictEqual({
+        additions: {}, modifications: {}, deletions: {}, hasChanges: false
+      })
+    })
+
+    it.each([undefined, null, [], [existing]])('preserves nested array additions for target %p', rules => {
+      const source = { rules: rules?.length ? [existing, added] : [added] }
+      const mergeDeep = new MergeDeep(log, jest.fn())
+
+      expect(mergeDeep.compareDeep({ rules }, source)).toStrictEqual({
+        additions: { rules: [added] },
+        modifications: {},
+        deletions: {},
+        hasChanges: true
+      })
+    })
+
+    it('does not unwind a user-defined __array property in an object comparison', () => {
+      const mergeDeep = new MergeDeep(log, jest.fn())
+
+      expect(mergeDeep.compareDeep({ __array: [] }, { __array: [added] })).toStrictEqual({
+        additions: { __array: [added] },
+        modifications: {},
+        deletions: {},
+        hasChanges: true
+      })
+    })
+
+    it.each([undefined, null, {}])('skips unsafe own keys when copying an empty target %p', target => {
+      const source = JSON.parse('{"name":"policy","__proto__":{"polluted":true},"constructor":{"polluted":true}}')
+      const mergeDeep = new MergeDeep(log, jest.fn())
+      const result = mergeDeep.compareDeep(target, source)
+
+      expect(result).toStrictEqual({
+        additions: { name: 'policy' }, modifications: {}, deletions: {}, hasChanges: true
+      })
+      expect(Object.getPrototypeOf(result.additions)).toBe(Object.prototype)
+      expect(Object.hasOwn(result.additions, 'constructor')).toBe(false)
+    })
+
+    it.each([{}, []])('keeps recursive accumulator references for %p', additions => {
+      const mergeDeep = new MergeDeep(log, jest.fn())
+      const source = Array.isArray(additions) ? [added] : { rules: [added] }
+      const modifications = Array.isArray(additions) ? [] : {}
+      const deletions = Array.isArray(additions) ? [] : {}
+      const result = mergeDeep.compareDeep(undefined, source, additions, modifications, deletions)
+
+      expect(result).toStrictEqual({ additions: source, modifications, deletions, hasChanges: true })
+      expect(result.additions).toBe(additions)
+      expect(result.modifications).toBe(modifications)
+      expect(result.deletions).toBe(deletions)
+    })
+
+    it.each([[[]], [[existing]]])('does not mutate inputs for target %p', entries => {
+      const target = Object.freeze(entries.map(entry => Object.freeze({ ...entry })))
+      const source = Object.freeze([Object.freeze({ ...existing }), Object.freeze({ ...added })])
+      const snapshot = structuredClone({ target, source })
+      const mergeDeep = new MergeDeep(log, jest.fn())
+      const result = mergeDeep.compareDeep(target, source)
+
+      expect({ target, source }).toEqual(snapshot)
+      expect(result.additions).toStrictEqual(entries.length ? [added] : source)
+      expect(result.additions).not.toBe(source)
+    })
+  })
+
   it('CompareDeep extensive test', () => {
     const target = YAML.load(`
 repository:
@@ -290,6 +494,7 @@ branches:
           }
         },
       modifications: {},
+      deletions: {},
       hasChanges: true
     }
     const ignorableFields = []
@@ -303,8 +508,7 @@ branches:
     )
     const merged = mergeDeep.compareDeep({}, source)
     console.log(`diffs ${JSON.stringify(merged, null, 2)}`)
-    expect(merged.additions).toEqual(expected.additions)
-    expect(merged.modifications.length).toEqual(expected.modifications.length)
+    expect(merged).toStrictEqual(expected)
 
     const overrideConfig = mergeDeep.mergeDeep({}, {}, source)
     const same = mergeDeep.compareDeep(overrideConfig, source)
@@ -809,6 +1013,7 @@ entries:
         ]
       },
       modifications: {},
+      deletions: {},
       hasChanges: true
     }
     const ignorableFields = []
@@ -1065,7 +1270,7 @@ entries:
         pendinginvite: false,
         permission: 'admin'
       }],
-      modifications: {}
+      modifications: []
     }
 
     const ignorableFields = []
@@ -1080,13 +1285,13 @@ entries:
     const merged = mergeDeep.compareDeep(target, source)
     console.log(`diffs ${JSON.stringify(merged, null, 2)}`)
     expect(merged.deletions).toEqual(expected.deletions)
-    expect(merged.modifications.length).toEqual(expected.modifications.length)
+    expect(merged.modifications).toEqual(expected.modifications)
 
     const overrideConfig = mergeDeep.mergeDeep({}, target, source)
     const same = mergeDeep.compareDeep(overrideConfig, target)
-    expect(same.additions).toEqual({})
-    expect(same.modifications).toEqual({})
-    expect(same.modifications).toEqual({})
+    expect(same).toStrictEqual({
+      additions: [], modifications: [], deletions: [], hasChanges: false
+    })
   })
 
   it('Ruleset Compare Works when no changes', () => {
@@ -1312,6 +1517,151 @@ entries:
     // console.log(`source ${JSON.stringify(source, null, 2)}`)
     // console.log(`target ${JSON.stringify(target, null, 2)}`)
     // console.log(`diffs ${JSON.stringify(merged, null, 2)}`)
+  })
+
+  it('Ruleset Compare detects required_reviewers removal without bypass_actors churn', () => {
+    // Existing ruleset in GitHub: has required_reviewers and a server-defaulted
+    // allowed_merge_methods. GitHub returns actor_id: null for the OrganizationAdmin
+    // bypass actor.
+    const target = {
+      id: 12345,
+        name: 'synk',
+        target: 'branch',
+        source_type: 'Repository',
+        source: 'decyjphr-org/test',
+        enforcement: 'active',
+        node_id: 'RRS_xxx',
+        created_at: '2024-01-01T00:00:00Z',
+        updated_at: '2024-01-02T00:00:00Z',
+        current_user_can_bypass: 'always',
+        _links: { self: { href: 'https://api.github.com/repos/x/y/rulesets/12345' } },
+        bypass_actors: [
+          { actor_id: null, actor_type: 'OrganizationAdmin', bypass_mode: 'pull_request' }
+        ],
+        conditions: { ref_name: { exclude: [], include: ['~DEFAULT_BRANCH'] } },
+        rules: [
+          {
+            type: 'pull_request',
+            parameters: {
+              dismiss_stale_reviews_on_push: true,
+              require_code_owner_review: false,
+              require_last_push_approval: false,
+              required_approving_review_count: 2,
+              required_review_thread_resolution: false,
+              required_reviewers: [
+                { minimum_approvals: 1, file_patterns: ['*.js'], reviewer: { id: 11721733, type: 'Team' } }
+              ],
+              allowed_merge_methods: ['merge', 'squash', 'rebase']
+            }
+          }
+        ]
+      }
+    // Config: required_reviewers removed, OrganizationAdmin bypass actor with explicit id.
+    const source = {
+      name: 'synk',
+      target: 'branch',
+      enforcement: 'active',
+      bypass_actors: [
+        { actor_id: 1, actor_type: 'OrganizationAdmin', bypass_mode: 'pull_request' }
+      ],
+      conditions: { ref_name: { exclude: [], include: ['~DEFAULT_BRANCH'] } },
+      rules: [
+        {
+          type: 'pull_request',
+          parameters: {
+            dismiss_stale_reviews_on_push: true,
+            require_code_owner_review: false,
+            require_last_push_approval: false,
+            required_approving_review_count: 2,
+            required_review_thread_resolution: false
+          }
+        }
+      ]
+    }
+    const ignorableFields = []
+    const mockReturnGitHubContext = jest.fn().mockReturnValue({
+      request: () => {}
+    })
+    const mergeDeep = new MergeDeep(
+      log,
+      mockReturnGitHubContext,
+      ignorableFields
+    )
+    const merged = mergeDeep.compareDeep(target, source)
+
+    // The removal of required_reviewers must be detected as a change.
+    expect(merged.hasChanges).toBeTruthy()
+    expect(merged.deletions.rules[0].parameters.required_reviewers).toEqual([
+      { minimum_approvals: 1, file_patterns: ['*.js'], reviewer: { id: 11721733, type: 'Team' } }
+    ])
+    // The OrganizationAdmin bypass actor (actor_id 1 vs null) must NOT churn.
+    expect(merged.additions.bypass_actors).toBeUndefined()
+    expect(merged.deletions.bypass_actors).toBeUndefined()
+    // allowed_merge_methods is a server-managed default and must NOT be a deletion.
+    expect(merged.deletions.rules[0].parameters.allowed_merge_methods).toBeUndefined()
+  })
+
+  it('Ruleset Compare reports no change when unnamed object array keys are reordered', () => {
+    // code_scanning_tools elements are keyed by `tool` (not a NAME_FIELD), so they
+    // fall back to a stable identity. GitHub returns the object keys in a different
+    // order than config; this must NOT produce spurious add/modify/delete churn.
+    const target = {
+      id: 17806629,
+      name: 'Prevent merges when new SONAR alerts are introduced',
+      target: 'branch',
+      source_type: 'Repository',
+      source: 'decyjphr-emu/test',
+      enforcement: 'active',
+      node_id: 'RRS_xxx',
+      created_at: '2026-06-17T18:45:28.141Z',
+      updated_at: '2026-06-17T18:45:28.162Z',
+      current_user_can_bypass: 'always',
+      _links: { self: { href: 'https://x' }, html: { href: 'https://y' } },
+      bypass_actors: [
+        { actor_id: null, actor_type: 'OrganizationAdmin', bypass_mode: 'always' }
+      ],
+      conditions: { ref_name: { exclude: [], include: ['~DEFAULT_BRANCH'] } },
+      rules: [
+        {
+          type: 'code_scanning',
+          parameters: {
+            code_scanning_tools: [
+              { tool: 'Sonar', security_alerts_threshold: 'medium_or_higher', alerts_threshold: 'none' }
+            ]
+          }
+        }
+      ]
+    }
+    const source = {
+      name: 'Prevent merges when new SONAR alerts are introduced',
+      target: 'branch',
+      enforcement: 'active',
+      conditions: { ref_name: { include: ['~DEFAULT_BRANCH'], exclude: [] } },
+      bypass_actors: [
+        { actor_type: 'OrganizationAdmin', bypass_mode: 'always' }
+      ],
+      rules: [
+        {
+          type: 'code_scanning',
+          parameters: {
+            code_scanning_tools: [
+              { tool: 'Sonar', alerts_threshold: 'none', security_alerts_threshold: 'medium_or_higher' }
+            ]
+          }
+        }
+      ]
+    }
+    const ignorableFields = []
+    const mockReturnGitHubContext = jest.fn().mockReturnValue({
+      request: () => {}
+    })
+    const mergeDeep = new MergeDeep(
+      log,
+      mockReturnGitHubContext,
+      ignorableFields
+    )
+    const merged = mergeDeep.compareDeep(target, source)
+    expect(merged.hasChanges).toBeFalsy()
   })
 
   it('Ruleset Compare Works when required_status_checks change', () => {
@@ -1881,5 +2231,48 @@ branches:
     console.log(`new diffs ${JSON.stringify(same, null, 2)}`)
     expect(same.additions).toEqual({})
     expect(same.modifications).toEqual({})
+  })
+
+  // Regression test for: TypeError: Cannot assign to read only property '0' of
+  // object '[object String]'. This was thrown by compareDeepIfVisited when a
+  // team entry had BOTH a changed primitive field (e.g. `permission`, which
+  // becomes a modification) AND a field the target lacks entirely (e.g.
+  // `external_group`, which becomes an addition). addIdentifyingAttribute adds
+  // the `name` identifying value as a plain string to both the addition and
+  // the modification containers, and the old merge logic then tried to
+  // Object.assign(modificationNameString, additionNameString) -- boxing a
+  // primitive string as the assignment target throws because string indices
+  // are read-only.
+  it('CompareDeep does not throw when a team has both a changed field and a new external_group field', () => {
+    const target = [
+      { id: 1, name: 'Azure-Security-GHEC-Runners-Developers', slug: 'azure-security-ghec-runners-developers', permission: 'push', privacy: 'closed' }
+    ]
+    const source = [
+      { name: 'Azure-Security-GHEC-Runners-Developers', permission: 'admin', external_group: 'Azure-Security-GHEC-Runners-Developers', privacy: 'closed' }
+    ]
+
+    const ignorableFields = ['id', 'node_id', 'url']
+    const mockReturnGitHubContext = jest.fn().mockReturnValue({
+      request: () => {}
+    })
+    const mergeDeep = new MergeDeep(
+      log,
+      mockReturnGitHubContext,
+      ignorableFields
+    )
+
+    let merged
+    expect(() => {
+      merged = mergeDeep.compareDeep(target, source)
+    }).not.toThrow()
+
+    expect(merged.hasChanges).toBe(true)
+    expect(merged.modifications).toEqual([
+      {
+        permission: 'admin',
+        name: 'Azure-Security-GHEC-Runners-Developers',
+        external_group: 'Azure-Security-GHEC-Runners-Developers'
+      }
+    ])
   })
 })

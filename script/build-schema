@@ -4,10 +4,51 @@ const $RefParser = require('@apidevtools/json-schema-ref-parser')
 const fs = require('node:fs/promises')
 const path = require('node:path')
 
+// Safe-settings lets users reference ruleset bypass actors and required
+// reviewers by name instead of numeric id. GitHub's published schema only
+// knows about the id fields, so after dereferencing we inject the optional
+// name-based alternatives:
+//   - bypass_actors[].name  -> alternative to actor_id (team slug, username,
+//     GitHub App slug, or repository role name; resolved via actor_type)
+//   - reviewer.slug          -> alternative to reviewer.id (team slug)
+const augmentRulesetAliases = (node) => {
+  if (Array.isArray(node)) {
+    node.forEach(augmentRulesetAliases)
+    return
+  }
+  if (!node || typeof node !== 'object') return
+
+  const props = node.properties
+  if (props && typeof props === 'object') {
+    // Bypass actor object: has both actor_type and actor_id.
+    if (props.actor_type && props.actor_id && !props.name) {
+      props.name = {
+        type: 'string',
+        description: 'Human-friendly alternative to `actor_id`. The team slug, username, GitHub App slug, or repository role name (resolved using `actor_type`). Cannot be combined with `actor_id`.'
+      }
+    }
+    // Reviewer object: has id and a type enum restricted to Team.
+    if (props.id && props.type && Array.isArray(props.type.enum) &&
+        props.type.enum.length === 1 && props.type.enum[0] === 'Team' && !props.slug) {
+      props.slug = {
+        type: 'string',
+        description: 'Human-friendly alternative to `id`. The slug of the team that must review changes to matching files. Cannot be combined with `id`.'
+      }
+      if (Array.isArray(node.required)) {
+        node.required = node.required.filter(r => r !== 'id')
+      }
+    }
+  }
+
+  for (const value of Object.values(node)) {
+    if (value && typeof value === 'object') augmentRulesetAliases(value)
+  }
+}
+
 const schemas = [
   { src: 'schema/settings.json', dest: 'schema/dereferenced/settings.json' },
-  { src: 'schema/suborgs.json',  dest: 'schema/dereferenced/suborgs.json' },
-  { src: 'schema/repos.json',    dest: 'schema/dereferenced/repos.json' }
+  { src: 'schema/suborgs.json', dest: 'schema/dereferenced/suborgs.json' },
+  { src: 'schema/repos.json', dest: 'schema/dereferenced/repos.json' }
 ]
 
 ;(async () => {
@@ -34,7 +75,7 @@ const schemas = [
 
   const githubApiResolver = {
     order: 1,
-    canRead: /\/descriptions\/api\.github\.com\/api\.github\.com/,
+    canRead: file => file.url === specUrl,
     read: () => resolvedSpec
   }
 
@@ -44,6 +85,9 @@ const schemas = [
       const dereferenced = await $RefParser.dereference(path.resolve(src), {
         resolve: { githubApi: githubApiResolver }
       })
+      // Inject name-based aliases (bypass_actors[].name, reviewer.slug) that
+      // safe-settings supports but the published GitHub schema does not.
+      augmentRulesetAliases(dereferenced)
       await fs.writeFile(dest, JSON.stringify(dereferenced, null, 2))
       console.log(`Dereferenced ${src} → ${dest}`)
     } catch (err) {

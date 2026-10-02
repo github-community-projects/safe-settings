@@ -5,7 +5,7 @@ describe('Autolinks', () => {
   let github
 
   function configure (config) {
-    const log = { debug: jest.fn(), error: console.error }
+    const log = { debug: jest.fn(), info: jest.fn(), error: console.error }
     const nop = false
     const errors = []
     return new Autolinks(nop, github, repo, config, log, errors)

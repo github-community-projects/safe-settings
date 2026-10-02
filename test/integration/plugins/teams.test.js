@@ -1,16 +1,16 @@
+const { describe, it, beforeEach, afterEach } = require('node:test')
 const path = require('path')
 const fs = require('fs')
 const { CREATED, NO_CONTENT, OK } = require('http-status-codes')
 const any = require('@travi/any')
-const settings = require('../../../lib/settings')
-const { buildTriggerEvent, initializeNock, loadInstance, repository, teardownNock } = require('../common')
+const { bodyMatching, buildTriggerEvent, initializeNock, loadInstance, mockAdminRepository, repository, teardownNock } = require('../common')
 
 describe('teams plugin', function () {
   let probot, githubScope
 
-  beforeEach(() => {
+  beforeEach(async () => {
     githubScope = initializeNock()
-    probot = loadInstance()
+    probot = await loadInstance()
   })
 
   afterEach(() => {
@@ -24,35 +24,39 @@ describe('teams plugin', function () {
     const probotTeamId = any.integer()
     const greenkeeperKeeperTeamId = any.integer()
     const formationTeamId = any.integer()
+    const securityManagerRoleId = any.integer()
+    const securityManagerTeamId = any.integer()
+    mockAdminRepository(githubScope, encodedConfig)
     githubScope
-      .get(`/repos/${repository.owner.name}/${repository.name}/contents/${settings.FILE_PATH}`)
-      .reply(OK, { content: encodedConfig, name: 'settings.yml', type: 'file' })
+      .get(`/repos/${repository.owner.name}/${repository.name}`)
+      .reply(OK, { ...repository, archived: false })
     githubScope
       .get(`/repos/${repository.owner.name}/${repository.name}/teams`)
       .reply(
         OK,
         [
           { slug: 'greenkeeper-keeper', id: greenkeeperKeeperTeamId, permission: 'pull' },
-          { slug: 'form8ion', id: formationTeamId, permission: 'push' }
+          { slug: 'form8ion', id: formationTeamId, permission: 'push' },
+          { slug: 'security-managers', id: securityManagerTeamId, permission: 'push' }
         ]
       )
+    githubScope
+      .get(`/orgs/${repository.owner.name}/organization-roles`)
+      .reply(OK, [{ id: securityManagerRoleId, slug: 'security_manager', name: 'Security Manager' }])
+    githubScope
+      .get(`/orgs/${repository.owner.name}/organization-roles/${securityManagerRoleId}/teams`)
+      .reply(OK, [{ id: securityManagerTeamId, slug: 'security-managers', name: 'Security Managers' }])
     githubScope
       .get(`/orgs/${repository.owner.name}/teams/probot`)
       .reply(OK, { id: probotTeamId })
     githubScope
-      .put(`/teams/${probotTeamId}/repos/${repository.owner.name}/${repository.name}`, body => {
-        expect(body).toMatchObject({ permission: 'admin' })
-        return true
-      })
+      .put(`/orgs/${repository.owner.name}/teams/probot/repos/${repository.owner.name}/${repository.name}`, bodyMatching({ permission: 'admin' }))
       .reply(CREATED)
     githubScope
-      .put(`/teams/${greenkeeperKeeperTeamId}/repos/${repository.owner.name}/${repository.name}`, body => {
-        expect(body).toMatchObject({ permission: 'push' })
-        return true
-      })
+      .put(`/orgs/${repository.owner.name}/teams/greenkeeper-keeper/repos/${repository.owner.name}/${repository.name}`, bodyMatching({ permission: 'push' }))
       .reply(OK)
     githubScope
-      .delete(`/teams/${formationTeamId}/repos/${repository.owner.name}/${repository.name}`)
+      .delete(`/orgs/${repository.owner.name}/teams/form8ion/repos/${repository.owner.name}/${repository.name}`)
       .reply(NO_CONTENT)
 
     await probot.receive(buildTriggerEvent())

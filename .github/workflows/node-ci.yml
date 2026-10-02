@@ -22,6 +22,14 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:unit:ci
+      - run: npm run test:integration:ci
+      - name: Upload integration test report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: integration-junit-node-${{ matrix.node-version }}
+          path: reports/integration-junit.xml
+          if-no-files-found: ignore
     strategy:
       matrix:
         node-version:

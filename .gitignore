@@ -128,7 +128,7 @@ npm-debug.log
 .DS_Store
 node_modules/
 private-key.pem
-.env
+*.env
 *.pem
 .vscode
 yarn.lock

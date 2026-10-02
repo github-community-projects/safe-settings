@@ -14,3 +14,15 @@ suborgproperties:
 - EDP: true
 
 # Every other property is the same as the org level settings and can be overridden here
+
+# disable_plugins (optional) — disable safe-settings plugins for repos matched
+# by this suborg. Declared here, target values mean:
+#   - self     → strip from the suborg layer only.
+#   - children → strip from the repo layer for matched repos.
+#   - all      → strip from suborg + repo layers for matched repos.
+# Note: a suborg-level disable cannot strip config defined at the org layer.
+# See docs/README.md ("Disabling plugins") for details.
+#
+# disable_plugins:
+#   - plugin: labels
+#     target: all

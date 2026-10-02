@@ -217,6 +217,19 @@ custom_properties:
   - name: test
     value: test
 
+# Alternatively, preserve selected values owned by other automation.
+# Exclusions are case-insensitive regexes, not globs. Includes take precedence.
+# Other undeclared values are cleared (set to null).
+# custom_properties:
+#   include:
+#     - name: environment
+#       value: production
+#   exclude:
+#     - name: '^external-'
+#     - name: '^OWNER$'
+# Include/exclude lists merge across org, suborg and repo layers.
+# Invalid objects or patterns report a per-repo error and suppress all clears.
+
 # See the docs (https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/managing-repository-settings/configuring-autolinks-to-reference-external-resources) for a description of autolinks and replacement values.
 autolinks:
   - key_prefix: "JIRA-"
@@ -253,6 +266,7 @@ rulesets:
         # - Team
         # - Integration
         # - OrganizationAdmin
+        # - DeployKey
         actor_type: Team
         #  When the specified actor can bypass the ruleset. `pull_request`
         #  means that an actor can only bypass rules on pull requests.
@@ -260,7 +274,9 @@ rulesets:
         #  - pull_request
         bypass_mode: pull_request
 
-      - actor_id: 1
+      # GitHub ignores actor_id for OrganizationAdmin and DeployKey and returns
+      # null. Use null (or omit actor_id) for these actor types.
+      - actor_id: null
         actor_type: OrganizationAdmin
         bypass_mode: always
 
@@ -270,6 +286,23 @@ rulesets:
 
       - actor_id: 210920
         actor_type: Integration
+        bypass_mode: always
+
+      # Instead of looking up numeric ids, you can use the `name` field to
+      # reference an actor by name. safe-settings resolves it to `actor_id`
+      # based on `actor_type` before applying the ruleset:
+      #   - Team           -> team slug
+      #   - User           -> username
+      #   - Integration    -> GitHub App slug
+      #   - RepositoryRole -> role name (built-in: read, triage, write,
+      #                       maintain, admin; or a custom role name)
+      # Provide either `name` or `actor_id`, not both.
+      - name: my-team
+        actor_type: Team
+        bypass_mode: always
+
+      - name: admin
+        actor_type: RepositoryRole
         bypass_mode: always
 
     conditions:
@@ -332,6 +365,17 @@ rulesets:
           # All conversations on code must be resolved before a pull
           # request can be merged.
           required_review_thread_resolution: true
+          # A collection of reviewers and the file patterns they must
+          # approve. Each reviewer is a team. Use `id` (team id) or, to
+          # avoid looking up the id, `slug` (team slug) which
+          # safe-settings resolves before applying the ruleset. Provide
+          # either `slug` or `id`, not both.
+          required_reviewers:
+            - minimum_approvals: 1
+              file_patterns: ["*.js"]
+              reviewer:
+                slug: my-reviewers-team
+                type: Team
 
       # Choose which status checks must pass before branches can be merged
       # into a branch that matches this rule. When enabled, commits must
@@ -407,3 +451,34 @@ rulesets:
           negate: false
           operator: regex
           pattern: ".*\/.*"
+
+# disable_plugins (optional) — disable safe-settings plugins at the org layer.
+# Declared here:
+#   - target: self     → strips from the org layer only (affects org-level runs:
+#                        rulesets, custom_repository_roles).
+#   - target: children → strips from suborg + repo layers (per-repo runs).
+#   - target: all      → strips from org + suborg + repo layers.
+# Lower levels can never undo a strip declared at a higher level (union-only cascade).
+# See docs/README.md ("Disabling plugins") for the full strip matrix.
+#
+# disable_plugins:
+#   - plugin: custom_repository_roles
+#     target: self
+#   - branches             # shorthand → { plugin: branches, target: all }
+
+# additive_plugins (optional) — run selected Diffable plugins in additive mode.
+# In additive mode a plugin will only add and update entries; it will never
+# call remove(). Items that exist on GitHub but are absent from the YAML are
+# preserved. This is useful when you want safe-settings to enforce a baseline
+# of settings while still allowing teams to manage their own extra labels,
+# teams, environments, etc.
+#
+# Supported plugins (must extend Diffable):
+#   labels, collaborators, teams, milestones, autolinks, environments,
+#   custom_properties, variables, rulesets, custom_repository_roles
+#
+# NOT supported (non-Diffable): repository, archive, branches, validator
+#
+# additive_plugins:
+#   - labels          # never delete labels not in YAML
+#   - collaborators   # never remove collaborators not in YAML

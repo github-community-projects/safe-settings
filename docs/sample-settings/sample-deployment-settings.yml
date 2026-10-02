@@ -38,3 +38,14 @@ overridevalidators:
       Some error
     script: |
       return true
+
+# disable_plugins (optional) — disable safe-settings plugins at the deployment layer.
+# Each entry is either a plugin name (shorthand for target: all) or { plugin, target }.
+# target is one of: self | children | all (default: all).
+# Declared here, target: all strips the plugin from every level below for every repo.
+# See docs/README.md ("Disabling plugins") for the full strip matrix and limitations.
+#
+# disable_plugins:
+#   - plugin: rulesets       # disables rulesets everywhere
+#     target: all
+#   - milestones             # shorthand → { plugin: milestones, target: all }

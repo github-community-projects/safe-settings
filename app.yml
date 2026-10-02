@@ -22,21 +22,22 @@ default_events:
   - pull_request
   - push
   - repository
+  - repository_dispatch
   - repository_ruleset
   - team
-
 
 # The set of permissions needed by the GitHub App. The format of the object uses
 # the permission name for the key (for example, issues) and the access type for
 # the value (for example, write).
 # Valid values are `read`, `write`, and `none`
 default_permissions:
-    repository_custom_properties: write
-    organization_custom_properties: admin
-
     # Workflows, workflow runs and artifacts. (needed to read environments when repo is private or internal)
     # https://developer.github.com/v3/apps/permissions/#repository-permissions-for-actions
     actions: read
+
+    # Manage Actions variables.
+    # https://docs.github.com/en/rest/actions/variables?apiVersion=2022-11-28
+    actions_variables: write
 
     # Repository creation, deletion, settings, teams, and collaborators.
     # https://developer.github.com/v3/apps/permissions/#permission-on-administration
@@ -54,6 +55,10 @@ default_permissions:
     # https://developer.github.com/v3/apps/permissions/#permission-on-deployments
     # deployments: read
 
+    enterprise_organization_installations: write
+
+    enterprise_organization_installation_repositories: write
+
     # Manage repository environments.
     # https://developer.github.com/v3/apps/permissions/#repository-permissions-for-environments
     environments: write
@@ -62,37 +67,13 @@ default_permissions:
     # https://developer.github.com/v3/apps/permissions/#permission-on-issues
     issues: write
 
-    # Search repositories, list collaborators, and access repository metadata.
-    # https://developer.github.com/v3/apps/permissions/#metadata-permissions
-    metadata: read
-
-    # Retrieve Pages statuses, configuration, and builds, as well as create new builds.
-    # https://developer.github.com/v3/apps/permissions/#permission-on-pages
-    # pages: read
-
-    # Pull requests and related comments, assignees, labels, milestones, and merges.
-    # https://developer.github.com/v3/apps/permissions/#permission-on-pull-requests
-    pull_requests: write
-
-    # Manage the post-receive hooks for a repository.
-    # https://developer.github.com/v3/apps/permissions/#permission-on-repository-hooks
-    # repository_hooks: read
-
-    # Manage repository projects, columns, and cards.
-    # https://developer.github.com/v3/apps/permissions/#permission-on-repository-projects
-    # repository_projects: read
-
-    # Retrieve security vulnerability alerts.
-    # https://developer.github.com/v4/object/repositoryvulnerabilityalert/
-    # vulnerability_alerts: read
-
-    # Commit statuses.
-    # https://developer.github.com/v3/apps/permissions/#permission-on-statuses
-    statuses: write
-
     # Organization members and teams.
     # https://developer.github.com/v3/apps/permissions/#permission-on-members
     members: write
+
+    # Search repositories, list collaborators, and access repository metadata.
+    # https://developer.github.com/v3/apps/permissions/#metadata-permissions
+    metadata: read
 
     # View and manage users blocked by the organization.
     # https://developer.github.com/v3/apps/permissions/#permission-on-organization-user-blocking
@@ -113,6 +94,42 @@ default_permissions:
     # Get notified of, and update, content references.
     # https://developer.github.com/v3/apps/permissions/
     organization_administration: write
+
+    # Manage custom organization roles.
+    # https://docs.github.com/en/enterprise-cloud@latest/rest/authentication/permissions-required-for-github-apps?apiVersion=2026-03-10#organization-permissions-for-custom-organization-roles
+    organization_custom_org_roles: write
+
+    # Manage custom repository roles.
+    # https://docs.github.com/en/enterprise-cloud@latest/rest/authentication/permissions-required-for-github-apps?apiVersion=2026-03-10#organization-permissions-for-custom-repository-roles
+    organization_custom_roles: write
+
+    organization_custom_properties: admin
+
+    # Retrieve Pages statuses, configuration, and builds, as well as create new builds.
+    # https://developer.github.com/v3/apps/permissions/#permission-on-pages
+    # pages: read
+
+    # Pull requests and related comments, assignees, labels, milestones, and merges.
+    # https://developer.github.com/v3/apps/permissions/#permission-on-pull-requests
+    pull_requests: write
+
+    repository_custom_properties: write
+
+    # Manage the post-receive hooks for a repository.
+    # https://developer.github.com/v3/apps/permissions/#permission-on-repository-hooks
+    # repository_hooks: read
+
+    # Manage repository projects, columns, and cards.
+    # https://developer.github.com/v3/apps/permissions/#permission-on-repository-projects
+    # repository_projects: read
+
+    # Retrieve security vulnerability alerts.
+    # https://developer.github.com/v4/object/repositoryvulnerabilityalert/
+    # vulnerability_alerts: read
+
+    # Commit statuses.
+    # https://developer.github.com/v3/apps/permissions/#permission-on-statuses
+    statuses: write
 
     # Manage Actions variables.
     # https://docs.github.com/en/rest/actions/variables?apiVersion=2026-03-10

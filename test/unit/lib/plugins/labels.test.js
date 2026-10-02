@@ -28,7 +28,7 @@ describe('Labels', () => {
         }
       }
     }
-    log = { debug: jest.fn(), error: console.error }
+    log = { debug: jest.fn(), info: jest.fn(), error: console.error }
   })
 
   describe('sync', () => {
@@ -50,6 +50,8 @@ describe('Labels', () => {
       ])
 
       return plugin.sync().then(() => {
+        expect(log.info).toHaveBeenCalledWith(expect.stringContaining('Applying Labels changes to bkeepers/test'))
+
         expect(github.rest.issues.deleteLabel).toHaveBeenCalledWith({
           owner: 'bkeepers',
           repo: 'test',
