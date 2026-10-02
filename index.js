@@ -799,7 +799,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     const { repository } = payload
     const pull_request = payload.pull_request
     const adminRepo = repository.name === env.ADMIN_REPO
-    const hubMasterRepo = repository.name === env.SAFE_SETTINGS_HUB_REPO
+    const hubMasterRepo = repository.name === env.SAFE_SETTINGS_HUB_REPO && repository.owner.login === env.SAFE_SETTINGS_HUB_ORG
 
     robot.log.debug(`Is Admin repo event ${adminRepo}, Is Hub-sync master repo ${hubMasterRepo}`)
     if (!adminRepo && !hubMasterRepo) {
