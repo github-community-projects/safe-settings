@@ -1,19 +1,19 @@
 
 
-const request = require('supertest');
-const express = require('express');
+const request = require('supertest')
+const express = require('express')
 
-const { setupRoutes } = require('../../../lib/routes');
+const { setupRoutes } = require('../../../lib/routes')
 jest.mock('../../../lib/installationCache', () => ({
   getInstallations: jest.fn(),
   getOrgLogins: jest.fn(() => ['jetest99', 'jefeish-training']),
   getLastFetchedAt: jest.fn()
-}));
+}))
 jest.mock('../../../lib/hubSyncHandler', () => ({
   retrieveSettingsFromOrgs: jest.fn()
-}));
-const { getInstallations: cacheGetInstallations } = require('../../../lib/installationCache');
-const { retrieveSettingsFromOrgs } = require('../../../lib/hubSyncHandler');
+}))
+const { getInstallations: cacheGetInstallations } = require('../../../lib/installationCache')
+const { retrieveSettingsFromOrgs } = require('../../../lib/hubSyncHandler')
 
 let app;
 let robot;
@@ -32,10 +32,10 @@ jest.mock('../../../lib/env', () => ({
   SAFE_SETTINGS_HUB_PATH: 'safe-settings',
   SAFE_SETTINGS_HUB_REPO: 'safe-settings-config-master',
   SETTINGS_FILE_PATH: 'settings.yml'
-}));
+}))
 
 beforeEach(() => {
-  app = express();
+  app = express()
   // Ensure env.ADMIN_REPO is set
   process.env.ADMIN_REPO = 'safe-settings-config';
   // Mock robot.auth to avoid 500 errors in installation route
@@ -49,8 +49,8 @@ beforeEach(() => {
       }
     })
   };
-  app.use(setupRoutes(robot, (base) => express.Router()));
-});
+  app.use(setupRoutes(robot, (base) => express.Router()))
+})
 
 /**
  * Tests the /api/safe-settings/installation endpoint.
@@ -63,19 +63,19 @@ describe('GET /api/safe-settings/installation', () => {
       { id: 84980804, account: { login: 'jetest99', type: 'Organization' }, created_at: '2025-09-08T23:17:59.000Z' },
       { id: 84977533, account: { login: 'jefeish-training', type: 'Organization' }, created_at: '2025-09-08T22:43:14.000Z' }
     ];
-    cacheGetInstallations.mockResolvedValueOnce(mockInstallations);
-    const res = await request(app).get('/api/safe-settings/installation');
-    // expect(res.statusCode).toBe(200);
-    expect(res.body.installations).toBeDefined();
-    expect(res.body.installations.length).toBe(mockInstallations.length);
-    expect(res.body.installations[0].account).toBe('jetest99');
-  });
+    cacheGetInstallations.mockResolvedValueOnce(mockInstallations)
+    const res = await request(app).get('/api/safe-settings/installation')
+    // expect(res.statusCode).toBe(200)
+    expect(res.body.installations).toBeDefined()
+    expect(res.body.installations.length).toBe(mockInstallations.length)
+    expect(res.body.installations[0].account).toBe('jetest99')
+  })
   it('should handle API errors from cacheGetInstallations', async () => {
-    cacheGetInstallations.mockRejectedValueOnce(new Error('API down'));
-    const res = await request(app).get('/api/safe-settings/installation');
-    expect([500, 404]).toContain(res.statusCode);
-  });
-});
+    cacheGetInstallations.mockRejectedValueOnce(new Error('API down'))
+    const res = await request(app).get('/api/safe-settings/installation')
+    expect([500, 404]).toContain(res.statusCode)
+  })
+})
 
 /**
  * Tests the /api/safe-settings/hub/content endpoint.
@@ -85,15 +85,15 @@ describe('GET /api/safe-settings/installation', () => {
 describe('GET /api/safe-settings/hub/content', () => {
 
   it('should return hub content', async () => {
-    const res = await request(app).get('/api/safe-settings/hub/content');
-    expect([200, 404, 500]).toContain(res.statusCode);
-    expect(res.body).toBeDefined();
-  });
+    const res = await request(app).get('/api/safe-settings/hub/content')
+    expect([200, 404, 500]).toContain(res.statusCode)
+    expect(res.body).toBeDefined()
+  })
   it('should handle API errors', async () => {
-    const res = await request(app).get('/api/safe-settings/hub/content');
-    expect([500, 404]).toContain(res.statusCode);
-  });
-});
+    const res = await request(app).get('/api/safe-settings/hub/content')
+    expect([500, 404]).toContain(res.statusCode)
+  })
+})
 
 /**
  * Tests the /api/safe-settings/app/env endpoint.
@@ -102,22 +102,22 @@ describe('GET /api/safe-settings/hub/content', () => {
  */
 describe('GET /api/safe-settings/app/env', () => {
   it('should filter out PRIVATE_KEY_PATH and return correct count', async () => {
-    const res = await request(app).get('/api/safe-settings/app/env');
-    expect(res.statusCode).toBe(200);
-    expect(res.body).toBeDefined();
+    const res = await request(app).get('/api/safe-settings/app/env')
+    expect(res.statusCode).toBe(200)
+    expect(res.body).toBeDefined()
     // Should not include PRIVATE_KEY_PATH
-    expect(res.body.variables.some(v => v.key === 'PRIVATE_KEY_PATH')).toBe(false);
+    expect(res.body.variables.some(v => v.key === 'PRIVATE_KEY_PATH')).toBe(false)
     // Should return 13 variables
-    expect(res.body.count).toBe(13);
-    expect(res.body.variables.length).toBe(13);
+    expect(res.body.count).toBe(13)
+    expect(res.body.variables.length).toBe(13)
     // Each variable should have key, value, and description
     res.body.variables.forEach(v => {
-      expect(v).toHaveProperty('key');
-      expect(v).toHaveProperty('value');
-      expect(v).toHaveProperty('description');
-    });
-  });
-});
+      expect(v).toHaveProperty('key')
+      expect(v).toHaveProperty('value')
+      expect(v).toHaveProperty('description')
+    })
+  })
+})
 
 /**
  * Tests the /api/safe-settings/hub/import endpoint.
@@ -127,20 +127,20 @@ describe('GET /api/safe-settings/app/env', () => {
 describe('POST /api/safe-settings/hub/import', () => {
 
   it('should return 400 if no orgs', async () => {
-    const res = await request(app).post('/api/safe-settings/hub/import').send({});
-    expect(res.statusCode).toBe(400);
-    expect(res.body.error).toMatch(/Missing orgs/);
-  });
+    const res = await request(app).post('/api/safe-settings/hub/import').send({})
+    expect(res.statusCode).toBe(400)
+    expect(res.body.error).toMatch(/Missing orgs/)
+  })
   it('should process import with orgs', async () => {
-    retrieveSettingsFromOrgs.mockResolvedValueOnce([{ org: 'org1', success: true }]);
-    const res = await request(app).post('/api/safe-settings/hub/import').send({ orgs: ['org1'] });
-    expect(res.statusCode).toBe(200);
-    expect(res.body.ok).toBe(true);
-  });
+    retrieveSettingsFromOrgs.mockResolvedValueOnce([{ org: 'org1', success: true }])
+    const res = await request(app).post('/api/safe-settings/hub/import').send({ orgs: ['org1'] })
+    expect(res.statusCode).toBe(200)
+    expect(res.body.ok).toBe(true)
+  })
   it('should handle API errors', async () => {
-    retrieveSettingsFromOrgs.mockRejectedValueOnce(new Error('API down'));
-    const res = await request(app).post('/api/safe-settings/hub/import').send({ orgs: ['org1'] });
-    expect(res.statusCode).toBe(200);
-    expect(res.body).toEqual({ ok: false, error: 'API down', results: [] });
-  });
-});
+    retrieveSettingsFromOrgs.mockRejectedValueOnce(new Error('API down'))
+    const res = await request(app).post('/api/safe-settings/hub/import').send({ orgs: ['org1'] })
+    expect(res.statusCode).toBe(200)
+    expect(res.body).toEqual({ ok: false, error: 'API down', results: [] })
+  })
+})
