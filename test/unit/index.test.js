@@ -1,17 +1,19 @@
 jest.mock('probot', () => ({ Probot: class Probot {} }))
 const { Probot } = require('probot')
 const plugin = require('../../index')
+jest.mock('../../lib/hubSyncHandler', () => ({ hubSyncHandler: jest.fn() }))
+const { hubSyncHandler } = require('../../lib/hubSyncHandler')
 
 describe.skip('plugin', () => {
   let app, event, sync, github
 
   beforeEach(() => {
     class Octokit {
-      static defaults () {
+      static defaults() {
         return Octokit
       }
 
-      constructor () {
+      constructor() {
         this.config = {
           get: jest.fn().mockReturnValue({})
         }
@@ -20,7 +22,7 @@ describe.skip('plugin', () => {
         }
       }
 
-      auth () {
+      auth() {
         return this
       }
     }
@@ -40,6 +42,8 @@ describe.skip('plugin', () => {
     sync = jest.fn()
 
     plugin(app, {}, { sync, FILE_NAME: '.github/settings.yml' })
+    jest.clearAllMocks()
+
   })
 
   describe('with settings modified on master', () => {

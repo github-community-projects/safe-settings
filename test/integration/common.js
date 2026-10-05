@@ -66,12 +66,12 @@ async function loadInstance () {
   assert.equal(current?.probot, undefined, 'loadInstance() called twice in one test')
   const state = current || beginTest()
 
-  // The app runs `info()` on load (without awaiting it), which lists the app
-  // installations. Answer that call once and wait for it below so it cannot
-  // leak into, or race with, the per-test scopes.
+  // The app prefetches installations and runs `info()` on load. Mock both
+  // startup requests so they cannot leak into, or race with, test scopes.
   const startup = nock(GITHUB_API)
     .get('/app/installations')
     .query(true)
+    .times(2)
     .reply(200, [])
   const startupReplied = new Promise(resolve => startup.once('replied', resolve))
 

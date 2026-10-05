@@ -33,16 +33,23 @@
   "license": "ISC",
   "dependencies": {
     "@apidevtools/json-schema-ref-parser": "^14.2.1",
+    "@octokit/auth-app": "^8.0.2",
     "@probot/adapter-aws-lambda-serverless": "^4.0.3",
+    "d3-drag": "^3.0.0",
+    "d3-force": "^3.0.0",
+    "d3-selection": "^3.0.0",
     "deepmerge": "^4.3.1",
     "eta": "^3.5.0",
     "js-yaml": "^4.1.0",
     "lodash": "^4.18.1",
     "minimatch": "^10.2.1",
+    "next": "^15.5.2",
     "node-cron": "^4.2.1",
     "octokit": "^5.0.2",
     "probot": "^14.3.2",
     "proxy-from-env": "^2.1.0",
+    "swr": "^2.4.1",
+    "express": "^4.22.3",
     "undici": "^7.7.0"
   },
   "devDependencies": {
@@ -64,7 +71,8 @@
     "nodemon": "^3.1.9",
     "npm-run-all": "^4.1.5",
     "smee-client": "^5.0.0",
-    "standard": "^17.1.2"
+    "standard": "^17.1.2",
+    "supertest": "^7.2.2"
   },
   "standard": {
     "env": [
