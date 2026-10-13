@@ -24,15 +24,27 @@ let deploymentConfig
 
 module.exports = (robot, { addHandler }, Settings = require('./lib/settings')) => {
   let appSlug = 'safe-settings'
+  let httpRoutesRegistered = false
 
   // Initialize all routes (static UI + API) via centralized module
   // Full-sync runs without Probot's HTTP server; only initialize routes when
   // the runtime provides one.
   if (typeof addHandler === 'function') {
-    setupRoutes(robot, addHandler)
+    try {
+      setupRoutes(robot, addHandler)
+      httpRoutesRegistered = true
+    } catch (error) {
+      if (error && error.message === 'No server instance') {
+        robot.log.debug('HTTP server is unavailable; skipping UI and API route registration')
+      } else {
+        throw error
+      }
+    }
   }
-  // Initialize installation cache (env-controlled prefetch)
-  initCache(robot)
+  // Prefetch for the dashboard; other runtimes refresh the cache lazily.
+  if (httpRoutesRegistered) {
+    initCache(robot)
+  }
 
   // Cache of enterprise slug → enterprise installation id. Keyed by slug so a
   // cached id is never reused for a different enterprise (e.g. when the app
