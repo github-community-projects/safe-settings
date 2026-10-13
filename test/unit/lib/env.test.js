@@ -9,7 +9,8 @@ describe('env', () => {
     CREATE_PR_COMMENT: 'true',
     PR_COMMENT_SUMMARY_ENABLED: 'false',
     FULL_SYNC_NOP: false,
-    GH_ORG: undefined
+    GH_ORG: undefined,
+    SAFE_SETTINGS_HUB_URL_PREFIX: '/safe-settings'
   }
 
   beforeEach(() => {
@@ -63,6 +64,18 @@ describe('env', () => {
     it('preserves an explicit false summary flag', () => {
       process.env.PR_COMMENT_SUMMARY_ENABLED = 'false'
       expect(require('../../../lib/env').PR_COMMENT_SUMMARY_ENABLED).toEqual('false')
+    })
+  })
+
+  describe('normalize URL prefix', () => {
+    it.each([
+      ['', ''],
+      ['/', ''],
+      ['custom-prefix', '/custom-prefix'],
+      ['/custom-prefix', '/custom-prefix']
+    ])('normalizes %j to %j', (configuredPrefix, expectedPrefix) => {
+      process.env.SAFE_SETTINGS_HUB_URL_PREFIX = configuredPrefix
+      expect(require('../../../lib/env').SAFE_SETTINGS_HUB_URL_PREFIX).toEqual(expectedPrefix)
     })
   })
 })
