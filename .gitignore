@@ -133,6 +133,9 @@ private-key.pem
 .vscode
 yarn.lock
 
+# Runtime logs
+*.log
+
 # aws sam stuff
 .aws-sam
 samconfig.toml

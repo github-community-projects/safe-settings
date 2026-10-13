@@ -1,0 +1,277 @@
+/* Global Theme Variables */
+/* Default theme variables (light theme as default) */
+:root {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8f9fa;
+  --bg-accent: #eaecef;
+  --text-primary: #24292f;
+  --text-secondary: #6c757d;
+  --border-color: #dee2e6;
+}
+
+/* Theme variables based on data-theme attribute */
+[data-theme="light"] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8f9fa;
+  --bg-accent: #eaecef;
+  --text-primary: #24292f;
+  --text-secondary: #6c757d;
+  --border-color: #dee2e6;
+}
+
+[data-theme="dark"] {
+  --bg-primary: rgb(13, 17, 22);
+  --bg-secondary: #444444;
+  --bg-accent: #30363d;
+  --text-primary: #f0f6fc;
+  --text-secondary: #dddddd;
+  --border-color: #4d4d4d;
+}
+
+/* Legacy support for body classes */
+body.light-theme {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8f9fa;
+  --bg-accent: #eaecef;
+  --text-primary: #24292f;
+  --text-secondary: #6c757d;
+  --border-color: #dee2e6;
+}
+
+body.dark-theme {
+  --bg-primary: #161b22;
+  --bg-secondary: #444444;
+  --bg-accent: #30363d;
+  --text-primary: #f0f6fc;
+  --text-secondary: #b3b3b3;
+}
+
+/* Global Theme Styles */
+/* Default body styling (light theme as default) */
+body {
+  background: var(--bg-primary, #fff) !important;
+  color: var(--text-primary, #24292f) !important;
+}
+
+/* Theme-specific body styles using data-theme */
+[data-theme="light"] body,
+body.light-theme {
+  background: #fff !important;
+  color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] body,
+body.dark-theme {
+  background: rgb(24, 24, 24) !important;
+  color: var(--text-primary) !important;
+}
+
+/* Global Main Element Theme */
+[data-theme="light"] main,
+body.light-theme main {
+  background: #fff !important;
+  color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] main,
+body.dark-theme main {
+  /* background: #161b22; */
+  color: var(--text-primary) !important;
+}
+
+[data-theme="light"] .nav-link,
+body.light-theme .nav-link {
+  color: var(--text-primary) !important;
+}
+
+[data-theme="dark"] .nav-link,
+body.dark-theme .nav-link {
+  /* color: #f6f8fa !important; */
+  color: #6c757d !important;
+}
+
+/* title bar nav tabs */
+[data-theme="dark"] .nav-tabs,
+body.dark-theme .nav-tabs {
+  background: #22272e;
+  border: none !important;
+}
+
+[data-theme="light"] .nav-tabs,
+body.light-theme .nav-tabs {
+  border: none !important;
+}
+
+/* Apply theme variables to main element */
+main {
+  color: var(--text-primary) !important;
+  /* padding: 1rem; */
+  border-radius: 12px !important;
+  /* margin-top: 1rem; */
+}
+
+/* Theme Utility Classes */
+.theme-bg-primary {
+  background-color: var(--bg-primary) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-color) !important;
+}
+
+.theme-bg-secondary {
+  background-color: var(--bg-secondary);
+  color: var(--text-primary) !important;
+}
+
+.theme-bg-accent {
+  background-color: var(--bg-accent);
+  color: var(--text-primary) !important;
+}
+
+.theme-text-primary {
+  color: var(--text-primary) !important;
+}
+
+.theme-text-secondary {
+  color: var(--text-secondary) !important;
+}
+
+.theme-border {
+  border-color: var(--border-color) !important;
+  /* override bootstrap .border */
+}
+
+.border.theme-border,
+.theme-border.border {
+  border-color: var(--border-color) !important;
+}
+
+/* Global Font Utility Classes */
+.dark-font {
+  color: var(--text-primary) !important;
+}
+
+.light-font {
+  color: var(--text-primary) !important;
+}
+
+/* Organizations Table Styles */
+.ui-table .table {
+  background-color: var(--bg-primary) !important;
+  border-color: var(--border-color) !important;
+}
+
+.ui-table .table thead th {
+  background-color: var(--bg-secondary) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-color) !important;
+  font-weight: 600;
+}
+
+.ui-table .table tbody td {
+  background-color: var(--bg-primary) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-color) !important;
+}
+
+.ui-table .table tbody tr:hover {
+  background-color: var(--bg-accent) !important;
+}
+
+.ui-table .sortable-header:hover {
+  background-color: var(--bg-accent) !important;
+}
+
+.ui-table .input-group-text {
+  background-color: var(--bg-secondary) !important;
+  border-color: var(--border-color) !important;
+}
+
+.ui-table .form-control {
+  background-color: var(--bg-primary) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-color) !important;
+}
+
+.ui-table .form-control:focus {
+  background-color: var(--bg-primary);
+  color: var(--text-primary) !important;
+  border-color: var(--border-color) !important;
+  box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+}
+
+.ui-table .form-control::placeholder {
+  color: var(--text-secondary) !important;
+}
+
+.list-group-item {
+  background-color: var(--bg-primary) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-color) !important;
+}
+
+.list-group-item:hover {
+  background-color: var(--bg-accent) !important;
+}
+
+.text-muted {
+  color: var(--text-secondary) !important;
+}
+
+span.text-muted {
+  color: var(--text-secondary) !important;
+}
+
+code {
+  color: var(--text-primary) !important;
+}
+
+element {
+  color: var(--text-primary) !important;
+  background-color: var(--bg-secondary) !important;
+  border: 1px solid var(--border-color) !important;
+  margin-left: 10px !important;
+  gap: 1.5rem !important;
+}
+
+.input-group-text {
+  background-color: var(--bg-secondary) !important;
+  border: 1px solid var(--border-color) !important;
+  color: var(--text-primary) !important;
+}
+
+.table {
+  border-radius: 12px !important;
+  background-color: var(--bg-primary) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--border-color) !important;
+}
+
+/* Env vars table dark mode override */
+[data-theme="dark"] .env-vars table,
+body.dark-theme .env-vars table {
+  background-color: var(--bg-primary) !important;
+}
+
+[data-theme="dark"] .env-vars thead th,
+body.dark-theme .env-vars thead th {
+  background-color: var(--bg-secondary) !important;
+}
+
+th {
+  font-weight: 600;
+  background-color: var(--bg-secondary) !important;
+}
+
+tr td {
+  background-color: var(--bg-primary) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border-color) !important;
+}
+
+.log-error {
+  color: #c00 !important;
+}
+
+.log-warn {
+  color: #b8860b !important;
+}

@@ -8,6 +8,9 @@ const NopCommand = require('./lib/nopcommand')
 const SettingsGenerator = require('./lib/settingsGenerator')
 const AppOctokitClient = require('./lib/appOctokitClient')
 const env = require('./lib/env')
+const { setupRoutes } = require('./lib/routes')
+const { initCache } = require('./lib/installationCache')
+const { hubSyncHandler } = require('./lib/hubSyncHandler')
 const { getProxyForUrl } = require('proxy-from-env')
 const { setGlobalDispatcher, ProxyAgent } = require('undici')
 
@@ -19,8 +22,30 @@ if (proxyAddress) {
 
 let deploymentConfig
 
-module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) => {
+module.exports = (robot, { addHandler }, Settings = require('./lib/settings')) => {
   let appSlug = 'safe-settings'
+  let httpRoutesRegistered = false
+
+  // Initialize all routes (static UI + API) via centralized module
+  // Full-sync runs without Probot's HTTP server; only initialize routes when
+  // the runtime provides one.
+  if (typeof addHandler === 'function') {
+    try {
+      setupRoutes(robot, addHandler)
+      httpRoutesRegistered = true
+    } catch (error) {
+      if (error && error.message === 'No server instance') {
+        robot.log.debug('HTTP server is unavailable; skipping UI and API route registration')
+      } else {
+        throw error
+      }
+    }
+  }
+  // Prefetch for the dashboard; other runtimes refresh the cache lazily.
+  if (httpRoutesRegistered) {
+    initCache(robot)
+  }
+
   // Cache of enterprise slug → enterprise installation id. Keyed by slug so a
   // cached id is never reused for a different enterprise (e.g. when the app
   // handles events from multiple enterprises).
@@ -487,7 +512,8 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     const { repository } = payload
 
     const adminRepo = repository.name === env.ADMIN_REPO
-    if (!adminRepo) {
+    const hubMasterRepo = repository.name === env.SAFE_SETTINGS_HUB_REPO && repository.owner.login === env.SAFE_SETTINGS_HUB_ORG
+    if (!adminRepo && !hubMasterRepo) {
       return
     }
 
@@ -735,9 +761,10 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     const { payload } = context
     const { repository } = payload
     const adminRepo = repository.name === env.ADMIN_REPO
-    robot.log.debug(`Is Admin repo event ${adminRepo}`)
-    if (!adminRepo) {
-      robot.log.debug('Not working on the Admin repo, returning...')
+    const hubMasterRepo = repository.name === env.SAFE_SETTINGS_HUB_REPO && repository.owner.login === env.SAFE_SETTINGS_HUB_ORG
+    robot.log.debug(`Is Admin repo event ${adminRepo}, Is Hub-sync master repo ${hubMasterRepo}`)
+    if (!adminRepo && !hubMasterRepo) {
+      robot.log.debug('Not working on the Admin repo or Hub-sync master repo, returning...')
       return
     }
     const defaultBranch = payload.check_suite.head_branch === repository.default_branch
@@ -764,9 +791,10 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     const { payload } = context
     const { repository } = payload
     const adminRepo = repository.name === env.ADMIN_REPO
-    robot.log.debug(`Is Admin repo event ${adminRepo}`)
-    if (!adminRepo) {
-      robot.log.debug('Not working on the Admin repo, returning...')
+    const hubMasterRepo = repository.name === env.SAFE_SETTINGS_HUB_REPO && repository.owner.login === env.SAFE_SETTINGS_HUB_ORG
+    robot.log.debug(`Is Admin repo event ${adminRepo}, Is Hub-sync master repo ${hubMasterRepo}`)
+    if (!adminRepo && !hubMasterRepo) {
+      robot.log.debug('Not working on the Admin repo or Hub-sync master repo, returning...')
       return
     }
     const defaultBranch = payload.pull_request.head_branch === repository.default_branch
@@ -785,9 +813,10 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     const pull_request = payload.pull_request
     const adminRepo = repository.name === env.ADMIN_REPO
 
-    robot.log.debug(`Is Admin repo event ${adminRepo}`)
-    if (!adminRepo) {
-      robot.log.debug('Not working on the Admin repo, returning...')
+    const hubMasterRepo = repository.name === env.SAFE_SETTINGS_HUB_REPO && repository.owner.login === env.SAFE_SETTINGS_HUB_ORG
+    robot.log.debug(`Is Admin repo event ${adminRepo}, Is Hub-sync master repo ${hubMasterRepo}`)
+    if (!adminRepo && !hubMasterRepo) {
+      robot.log.debug('Not working on the Admin repo or Hub-sync master repo, returning...')
       return
     }
 
@@ -797,6 +826,20 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
       return
     }
     return createCheckRun(context, pull_request, payload.pull_request.head.sha, payload.pull_request.head.ref)
+  })
+
+  /**
+   * @description Handle pull_request.closed events to support hub synchronization
+   * @param {Object} context - The context object provided by Probot
+   */
+  robot.on('pull_request.closed', async context => {
+    if (!context.payload.pull_request?.merged) return null
+    try {
+      await hubSyncHandler(robot, context)
+    } catch (err) {
+      robot.log.error(`pull_request.closed handler failed: ${err && err.message ? err.message : err}`)
+    }
+    return null
   })
 
   robot.on(['check_suite.rerequested'], async context => {
@@ -828,9 +871,10 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     }
 
     const adminRepo = repository.name === env.ADMIN_REPO
-    robot.log.debug(`Is Admin repo event ${adminRepo}`)
-    if (!adminRepo) {
-      robot.log.debug('Not working on the Admin repo, returning...')
+    const hubMasterRepo = repository.name === env.SAFE_SETTINGS_HUB_REPO && repository.owner.login === env.SAFE_SETTINGS_HUB_ORG
+    robot.log.debug(`Is Admin repo event ${adminRepo}, Is Hub-sync master repo ${hubMasterRepo}`)
+    if (!adminRepo && !hubMasterRepo) {
+      robot.log.debug('Not working on the Admin repo or Hub-sync master repo, returning...')
       return
     }
 
@@ -858,6 +902,20 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     const settingsModified = files.includes(Settings.FILE_PATH)
     const repoChanges = getChangedRepoConfigName(files, context.repo().owner)
     const subOrgChanges = getChangedSubOrgConfigName(files)
+
+    // Check if hub-sync master files changed - handle separately from Safe-Settings validation
+    const hubPath = `${env.CONFIG_PATH}/${env.SAFE_SETTINGS_HUB_PATH}`.replace(/\/+/g, '/')
+    const globalsPattern = new RegExp(`^${hubPath}/globals/.*\\.ya?ml$`)
+    const orgsPattern = new RegExp(`^${hubPath}/organizations/([^/]+)/.*\\.ya?ml$`)
+    const hubSyncFilesChanged = files.filter(f => globalsPattern.test(f) || orgsPattern.test(f))
+
+    const baseRef = pull_request.base.ref || repository.default_branch
+
+    if (hubSyncFilesChanged.length > 0) {
+      robot.log.info(`Hub-sync master files detected: ${hubSyncFilesChanged.join(', ')}`)
+      const { validateAndReportHubSync } = require('./lib/hubSyncHandler')
+      return validateAndReportHubSync(robot, context, payload, pull_request, hubSyncFilesChanged, baseRef)
+    }
 
     if (settingsModified) {
       robot.log.debug(`Changes in '${Settings.FILE_PATH}' detected, doing a full synch...`)
