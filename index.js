@@ -21,6 +21,8 @@ let deploymentConfig
 
 module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) => {
   let appSlug = 'safe-settings'
+  // Set by info() once the app has authenticated; undefined until then.
+  let appId
   // Cache of enterprise slug → enterprise installation id. Keyed by slug so a
   // cached id is never reused for a different enterprise (e.g. when the app
   // handles events from multiple enterprises).
@@ -362,6 +364,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
       const github = await robot.auth(installation.id)
       const app = await github.rest.apps.getAuthenticated()
       appSlug = app.data.slug
+      appId = app.data.id
       robot.log.info(`Validated the app is configured properly = \n${JSON.stringify(app.data, null, 2)}`)
     }
 
@@ -731,7 +734,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     return syncAllSettings(false, updatedContext)
   })
 
-  robot.on('check_suite.requested', async context => {
+  robot.on(['check_suite.requested', 'check_suite.rerequested'], async context => {
     const { payload } = context
     const { repository } = payload
     const adminRepo = repository.name === env.ADMIN_REPO
@@ -769,7 +772,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
       robot.log.debug('Not working on the Admin repo, returning...')
       return
     }
-    const defaultBranch = payload.pull_request.head_branch === repository.default_branch
+    const defaultBranch = payload.pull_request.head.ref === repository.default_branch
     if (defaultBranch) {
       robot.log.debug(' Working on the default branch, returning...')
       return
@@ -791,22 +794,12 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
       return
     }
 
-    const defaultBranch = payload.pull_request.head_branch === repository.default_branch
+    const defaultBranch = payload.pull_request.head.ref === repository.default_branch
     if (defaultBranch) {
       robot.log.debug(' Working on the default branch, returning...')
       return
     }
     return createCheckRun(context, pull_request, payload.pull_request.head.sha, payload.pull_request.head.ref)
-  })
-
-  robot.on(['check_suite.rerequested'], async context => {
-    robot.log.debug('Check suite was rerequested!')
-    return createCheckRun(context)
-  })
-
-  robot.on(['check_suite.rerequested'], async context => {
-    robot.log.debug('Check suite was rerequested!')
-    return createCheckRun(context)
   })
 
   robot.on(['check_run.created'], async context => {
@@ -819,6 +812,13 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     const source = payload.check_run.name === 'Safe-setting validator'
     if (!source) {
       robot.log.debug(' Not triggered by Safe-settings...')
+      return
+    }
+
+    // Another safe-settings deployment (e.g. prod and non-prod apps on the same org)
+    // creates runs with the same name, but only the creating app can update them.
+    if (appId && check_run.app && check_run.app.id !== appId) {
+      robot.log.debug(' Check run belongs to another app, returning...')
       return
     }
 
@@ -852,8 +852,9 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
 
     params = Object.assign(context.repo(), { pull_number: pull_request.number })
 
-    const changes = await context.octokit.rest.pulls.listFiles(params)
-    const files = changes.data.map(f => { return f.filename })
+    // listFiles returns at most 30 files per page (and 3,000 files in total), so paginate.
+    const changes = await context.octokit.paginate(context.octokit.rest.pulls.listFiles, { ...params, per_page: 100 })
+    const files = changes.map(f => { return f.filename })
 
     const settingsModified = files.includes(Settings.FILE_PATH)
     const repoChanges = getChangedRepoConfigName(files, context.repo().owner)

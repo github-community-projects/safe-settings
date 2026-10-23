@@ -20,7 +20,7 @@ describe('configuration read error reporting', () => {
     handlers = new Map()
     const installation = { id: 123, account: { login: 'test-org' } }
     github = {
-      paginate: jest.fn().mockResolvedValue([installation]),
+      paginate: jest.fn(async (method, params) => method === github.rest.pulls.listFiles ? (await method(params)).data : [installation]),
       rest: {
         apps: {
           listInstallations: { endpoint: { merge: jest.fn().mockReturnValue({}) } },

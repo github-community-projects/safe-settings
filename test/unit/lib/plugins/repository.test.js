@@ -181,4 +181,97 @@ describe('Repository', () => {
       })
     })
   })
+
+  describe('default branch creation failures', () => {
+    const originalFlag = env.CREATE_DEFAULT_BRANCH
+    let client
+
+    function withEndpoint (name) {
+      return Object.assign(jest.fn().mockResolvedValue({}), {
+        endpoint: jest.fn(params => ({ url: `/${name}`, body: params }))
+      })
+    }
+
+    function branch (name, sha) {
+      return { data: { name, commit: { sha } } }
+    }
+
+    beforeEach(() => {
+      jest.clearAllMocks()
+      env.CREATE_DEFAULT_BRANCH = true
+      client = {
+        rest: {
+          repos: {
+            // An empty repo still reports a default branch, but the branch itself 404s.
+            get: jest.fn().mockResolvedValue({
+              data: { name: 'test', default_branch: 'main', topics: [], owner: { login: 'bkeepers' } }
+            }),
+            getBranch: jest.fn().mockRejectedValue({ status: 404 }),
+            update: withEndpoint('update'),
+            createInOrg: withEndpoint('createInOrg'),
+            replaceAllTopics: withEndpoint('replaceAllTopics')
+          },
+          git: {
+            createRef: withEndpoint('createRef')
+          }
+        }
+      }
+    })
+
+    afterEach(() => {
+      env.CREATE_DEFAULT_BRANCH = originalFlag
+    })
+
+    function build (nop, config, errors = []) {
+      return new Repository(nop, client, { owner: 'bkeepers', repo: 'test' }, config, 1, log, errors)
+    }
+
+    it('reports an ERROR in NOP mode when the repo is empty instead of rejecting unhandled', async () => {
+      const errors = []
+      const plugin = build(true, { default_branch: 'develop', force_create: true }, errors)
+
+      const res = await plugin.sync()
+
+      expect(res).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'ERROR', plugin: 'Repository' })]))
+      expect(errors.map(e => e.msg)).toEqual(expect.arrayContaining([
+        expect.stringContaining('Error creating default branch develop from main')
+      ]))
+      expect(client.rest.repos.createInOrg).not.toHaveBeenCalled()
+    })
+
+    it('includes the default branch NOP commands that resolve after sync() starts', async () => {
+      client.rest.repos.getBranch
+        .mockRejectedValueOnce({ status: 404 })
+        .mockImplementationOnce(() => new Promise(resolve => setTimeout(() => resolve(branch('main', 'deadbeef')), 10)))
+      const plugin = build(true, { default_branch: 'develop' })
+
+      const res = await plugin.sync()
+
+      const msgs = res.map(r => r.action.msg)
+      expect(msgs).toContain('Create default branch develop from main')
+      expect(msgs).toContain('Set default branch to develop')
+    })
+
+    it('does not try to create an existing empty repo in apply mode', async () => {
+      const errors = []
+      const plugin = build(false, { default_branch: 'develop', force_create: true }, errors)
+
+      await plugin.sync()
+
+      expect(client.rest.repos.createInOrg).not.toHaveBeenCalled()
+      expect(client.rest.git.createRef).not.toHaveBeenCalled()
+      expect(errors.length).toBeGreaterThan(0)
+      expect(log.error).toHaveBeenCalledWith(expect.stringContaining('Error creating default branch develop from main'))
+    })
+
+    it('still plans a single repo creation when the repo is missing', async () => {
+      client.rest.repos.get.mockRejectedValue({ status: 404 })
+      const plugin = build(true, { default_branch: 'develop', force_create: true })
+
+      const res = await plugin.sync()
+
+      expect(res).toHaveLength(1)
+      expect(res[0].action.msg).toBe('Create Repo')
+    })
+  })
 })
