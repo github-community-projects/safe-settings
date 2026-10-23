@@ -54,6 +54,21 @@ describe('Repository', () => {
       })
     })
 
+    it('does not update a repository whose only difference is has_downloads', () => {
+      // GitHub retired repository Downloads and always returns has_downloads: false,
+      // so a config asking for true never matches.
+      github.rest.repos.get.mockResolvedValueOnce({
+        data: { name: 'test', has_downloads: false, topics: [] }
+      })
+      const plugin = configure({
+        name: 'test',
+        has_downloads: true
+      })
+      return plugin.sync().then(() => {
+        expect(github.rest.repos.update).not.toHaveBeenCalled()
+      })
+    })
+
     it('handles renames', () => {
       const plugin = configure({
         name: 'new-name'
