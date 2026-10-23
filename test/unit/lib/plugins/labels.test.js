@@ -148,5 +148,45 @@ describe('Labels', () => {
         expect(github.rest.issues.createLabel).toHaveBeenCalledTimes(1)
       })
     })
+
+    describe('dry-run with excluded labels', () => {
+      const config = {
+        exclude: [{ name: '.*' }],
+        include: [
+          { name: 'managed', color: 'FFFFFF', description: '' },
+          { name: 'renamed', oldname: 'old-name', color: '000000', description: '' },
+          { name: 'added', color: '0000FF', description: '' }
+        ]
+      }
+
+      beforeEach(() => {
+        github.paginate.mockReturnValueOnce(Promise.resolve([
+          { name: 'keep-me', color: '000000', description: '' },
+          { name: 'managed', color: 'FF0000', description: '' },
+          { name: 'old-name', color: '000000', description: '' }
+        ]))
+        github.rest.issues.createLabel.endpoint = jest.fn().mockReturnValue({})
+        github.rest.issues.updateLabel.endpoint = jest.fn().mockReturnValue({})
+      })
+
+      it('does not report excluded labels as deletions', () => {
+        const plugin = new Labels(true, github, { owner: 'bkeepers', repo: 'test' }, config, log, [])
+
+        return plugin.sync().then(results => {
+          expect(JSON.stringify(results)).not.toContain('keep-me')
+        })
+      })
+
+      it('still updates and renames excluded labels that the config manages', () => {
+        const plugin = new Labels(true, github, { owner: 'bkeepers', repo: 'test' }, config, log, [])
+
+        return plugin.sync().then(() => {
+          const updatedNames = github.rest.issues.updateLabel.endpoint.mock.calls.map(([params]) => params.current_name)
+          const createdNames = github.rest.issues.createLabel.endpoint.mock.calls.map(([params]) => params.name)
+          expect(updatedNames.sort()).toEqual(['managed', 'old-name'])
+          expect(createdNames).toEqual(['added'])
+        })
+      })
+    })
   })
 })
