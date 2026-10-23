@@ -131,11 +131,6 @@ default_permissions:
     # https://developer.github.com/v3/apps/permissions/#permission-on-statuses
     statuses: write
 
-    # Manage Actions variables.
-    # https://docs.github.com/en/rest/actions/variables?apiVersion=2026-03-10
-    actions_variables: write
-
-
 # The name of the GitHub App. Defaults to the name specified in package.json
 name: Safe Settings
 
