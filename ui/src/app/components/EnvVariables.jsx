@@ -115,9 +115,9 @@ export default function EnvVariables() {
           <table className="table table-sm table-hover align-middle mb-0 theme-bg-primary" style={{ background: 'var(--bg-primary)' }}>
             <thead className="small">
               <tr className="theme-bg-secondary">
-                <th role="button" onClick={() => cycleSort('key')} className="theme-text-primary user-select-none" style={{ width: '20%', cursor: 'pointer' }}>Key {renderSortIcon('key')}</th>
-                <th role="button" onClick={() => cycleSort('value')} className="theme-text-primary user-select-none" style={{ width: '30%', cursor: 'pointer' }}>Value {renderSortIcon('value')}</th>
-                <th role="button" onClick={() => cycleSort('description')} className="theme-text-primary user-select-none" style={{ cursor: 'pointer' }}>Description {renderSortIcon('description')}</th>
+                <th className="theme-text-primary user-select-none" style={{ width: '20%' }}><button type="button" className="btn btn-link p-0 text-reset text-decoration-none" style={{ fontSize: 'inherit' }} onClick={() => cycleSort('key')}>Key {renderSortIcon('key')}</button></th>
+                <th className="theme-text-primary user-select-none" style={{ width: '30%' }}><button type="button" className="btn btn-link p-0 text-reset text-decoration-none" style={{ fontSize: 'inherit' }} onClick={() => cycleSort('value')}>Value {renderSortIcon('value')}</button></th>
+                <th className="theme-text-primary user-select-none"><button type="button" className="btn btn-link p-0 text-reset text-decoration-none" style={{ fontSize: 'inherit' }} onClick={() => cycleSort('description')}>Description {renderSortIcon('description')}</button></th>
                 <th className="theme-text-primary text-center" style={{ width: '50px' }}></th>
                 <th className="theme-text-primary" style={{ width: '50px' }}></th>
               </tr>

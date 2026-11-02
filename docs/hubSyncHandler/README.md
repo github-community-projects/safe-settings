@@ -252,9 +252,9 @@ rules:
 
 ##### `mergeStrategy`
 - **Type:** String (`merge`, `overwrite`, `preserve`)
-- **Description:** Determines how files are synced:
-  - `merge`:  use a PR to sync files 
-  - `overwrite`: Sync all files, replacing existing ones (direct commit, no PR)
+- **Description:** This field is retained in normalized rules but does not currently control delivery.
+  - PR versus direct-push delivery is controlled globally by `SAFE_SETTINGS_HUB_DIRECT_PUSH`.
+  - Per-rule `merge`, `overwrite`, and `preserve` behavior is not currently applied.
 - **Example:**  
   ```yaml
   mergeStrategy: merge
@@ -276,7 +276,7 @@ rules:
 |------|---------|---------|
 | `SAFE_SETTINGS_HUB_REPO` | Repo for master safe-settings contents | admin-master |
 | `SAFE_SETTINGS_HUB_ORG` | Organization that hold the Repo | admin-master-org |
-| `SAFE_SETTINGS_HUB_PATH` | source folder | .github/safe-settings  |
+| `SAFE_SETTINGS_HUB_PATH` | source folder relative to `CONFIG_PATH` | safe-settings |
 | `SAFE_SETTINGS_HUB_DIRECT_PUSH` | Use a PR or direct commit | false |
 
 

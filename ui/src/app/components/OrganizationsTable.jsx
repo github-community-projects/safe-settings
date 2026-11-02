@@ -359,9 +359,9 @@ const OrganizationsTable = ({ organizations: propOrganizations = [] }) => {
                     {r.pr}
                   </a>
                 </div>
-              ) : r.skipped ? (
+              ) : r.status === "skipped" || r.status === "N/A" ? (
                 <div className="theme-text-secondary">
-                  Skipping {r.org}: already present in hub
+                  {r.org}: {r.reason || r.status}
                 </div>
               ) : r.error ? (
                 <div className="text-danger">
@@ -417,11 +417,11 @@ const OrganizationsTable = ({ organizations: propOrganizations = [] }) => {
               <th
                 className="theme-text-primary sortable-header"
                 style={{ cursor: "pointer" }}
-                onClick={() => handleSort("name")}
               >
                 <div className="d-flex align-items-center">
-                  <div>Organization Name</div>
-                  <div className="ms-2">{renderSortIcon("name")}</div>
+                  <button type="button" className="btn btn-link p-0 text-reset text-decoration-none" onClick={() => handleSort("name")}>
+                    Organization Name {renderSortIcon("name")}
+                  </button>
                   <small className="text-muted ms-3">
                     Showing {sortedData.length} of {data.length} organizations
                   </small>

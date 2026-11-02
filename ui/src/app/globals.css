@@ -87,7 +87,7 @@ body.light-theme .nav-link {
 [data-theme="dark"] .nav-link,
 body.dark-theme .nav-link {
   /* color: #f6f8fa !important; */
-  color: #6c757d !important;
+  color: var(--text-primary) !important;
 }
 
 /* title bar nav tabs */

@@ -911,7 +911,7 @@ module.exports = (robot, { addHandler }, Settings = require('./lib/settings')) =
 
     const baseRef = pull_request.base.ref || repository.default_branch
 
-    if (hubSyncFilesChanged.length > 0) {
+    if (hubMasterRepo && hubSyncFilesChanged.length > 0) {
       robot.log.info(`Hub-sync master files detected: ${hubSyncFilesChanged.join(', ')}`)
       const { validateAndReportHubSync } = require('./lib/hubSyncHandler')
       return validateAndReportHubSync(robot, context, payload, pull_request, hubSyncFilesChanged, baseRef)

@@ -129,7 +129,7 @@ export default function SafeSettingsHubContent3b() {
     if (node.type === 'file') {
       const selected = selectedPath === node.path;
       return (
-        <div key={node.path} className={`d-flex align-items-center py-1 ${selected ? 'theme-bg-secondary' : ''}`} style={{ paddingLeft: depth * 12, cursor: 'pointer' }} onClick={() => setSelectedPath(node.path)}>
+        <div key={node.path} role="button" tabIndex={0} className={`d-flex align-items-center py-1 ${selected ? 'theme-bg-secondary' : ''}`} style={{ paddingLeft: depth * 12, cursor: 'pointer' }} onClick={() => setSelectedPath(node.path)} onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedPath(node.path); } }}>
           <FileIcon size={12} className="me-2" />
           <span className="small text-truncate">{node.name}</span>
         </div>
@@ -219,7 +219,7 @@ export default function SafeSettingsHubContent3b() {
                           <td className="fw-semibold text-break">
                             <span className="d-inline-flex align-items-center">
                               {child.type === 'dir' ? <FileDirectoryIcon size={14} className="me-2 text-primary" /> : <FileIcon size={14} className="me-2" />}
-                              {child.name}
+                              <button type="button" className="btn btn-link p-0 text-reset text-decoration-none fw-semibold" style={{ fontSize: 'inherit' }} onClick={() => setSelectedPath(child.path)}>{child.name}</button>
                             </span>
                           </td>
                           <td className="text-break">{child.lastCommitMessage || '—'}</td>
