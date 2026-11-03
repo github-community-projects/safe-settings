@@ -85,6 +85,60 @@ describe('Repository', () => {
         expect(log.info).toHaveBeenCalledWith(expect.stringContaining('Applying topic changes to bkeepers/test'))
       })
     })
+
+    it('applies security_and_analysis when it is the only setting that differs', () => {
+      github.rest.repos.get.mockResolvedValueOnce({
+        data: {
+          name: 'test',
+          topics: [],
+          security_and_analysis: {
+            secret_scanning: { status: 'enabled' },
+            code_security: { status: 'disabled' }
+          }
+        }
+      })
+      const plugin = configure({
+        name: 'test',
+        security_and_analysis: {
+          secret_scanning: { status: 'enabled' },
+          code_security: { status: 'enabled' }
+        }
+      })
+      return plugin.sync().then(() => {
+        expect(github.rest.repos.update).toHaveBeenCalledWith(expect.objectContaining({
+          owner: 'bkeepers',
+          repo: 'test',
+          security_and_analysis: {
+            secret_scanning: { status: 'enabled' },
+            code_security: { status: 'enabled' }
+          }
+        }))
+      })
+    })
+
+    it('does not update when security_and_analysis matches and GitHub returns extra features', () => {
+      github.rest.repos.get.mockResolvedValueOnce({
+        data: {
+          name: 'test',
+          topics: [],
+          security_and_analysis: {
+            secret_scanning: { status: 'enabled' },
+            secret_scanning_push_protection: { status: 'enabled' },
+            dependabot_security_updates: { status: 'enabled' }
+          }
+        }
+      })
+      const plugin = configure({
+        name: 'test',
+        security_and_analysis: {
+          secret_scanning: { status: 'enabled' },
+          secret_scanning_push_protection: { status: 'enabled' }
+        }
+      })
+      return plugin.sync().then(() => {
+        expect(github.rest.repos.update).not.toHaveBeenCalled()
+      })
+    })
   })
 
   describe('default_branch reconciliation', () => {
