@@ -833,7 +833,7 @@ module.exports = (robot, { addHandler }, Settings = require('./lib/settings')) =
    * @param {Object} context - The context object provided by Probot
    */
   robot.on('pull_request.closed', async context => {
-    if (!context.payload.pull_request?.merged) return null
+    if (!context.payload.pull_request?.merged || context.payload.pull_request.base.ref !== context.payload.repository.default_branch) return null
     try {
       await hubSyncHandler(robot, context)
     } catch (err) {

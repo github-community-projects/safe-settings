@@ -5,8 +5,7 @@
   "scripts": {
     "dev": "next dev --turbopack --port 3001",
     "build": "next build",
-    "export": "next build",
-    "start": "next start"
+    "export": "next build"
   },
   "dependencies": {
     "@primer/octicons-react": "^19.15.5",
