@@ -10,6 +10,13 @@ One central **master admin repository** (the hub) serves as the authoritative so
 
 **Note:** When something changes in the 'Master' repo (the hub), only those changed files are copied to each affected ORG’s admin repo, so everything stays in sync.
 
+Post-merge synchronization reads the manifest, global settings, organization
+settings, and copied files from the PR's merge commit SHA, not its head branch.
+This includes changes already on the default branch when the PR was merged.
+The PR number is still used to identify changed files. If the webhook omits the
+merge SHA, Hub-Sync retrieves it from GitHub; if it cannot be resolved, sync
+stops and logs an error rather than using a stale PR-head snapshot.
+
 #### :warning: In order for `Safe-Settings Hub-Sync` to enforce Policy sync in the controlled ORGs/Repos, **Safe-Settings** needs to be given **Bypass authority** for any branch protection Ruleset that prevents 'direct pushes'.
 
 ## Sync Lifecycle (High Level)

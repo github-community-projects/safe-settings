@@ -7,6 +7,7 @@ jest.mock('../../../lib/installationCache', () => ({
 const env = require('../../../lib/env')
 const { getInstallations } = require('../../../lib/installationCache')
 const { getDefaultBranch, syncHubOrgUpdate, syncHubGlobalsUpdate } = require('../../../lib/hubSyncHandler')
+const hubSync = require('../../../lib/hubSyncHandler')
 
 const notFound = () => Object.assign(new Error('Not Found'), { status: 404 })
 
@@ -41,7 +42,7 @@ function makeSpokeClient (defaultBranch) {
 // Hub client: no manifest (sync everything) and a single changed file.
 function makeContext (changedFile) {
   return {
-    payload: { pull_request: { number: 7, head: { sha: 'hub-head-sha' } } },
+    payload: { pull_request: { number: 7, merged: true, merge_commit_sha: 'hub-merge-sha', head: { sha: 'hub-head-sha' } } },
     repo: () => ({ owner: 'hub-org', repo: 'hub-repo' }),
     octokit: {
       paginate: jest.fn().mockResolvedValue([{ filename: changedFile }]),
@@ -179,5 +180,117 @@ describe('Hub-Sync uses the spoke repo default branch', () => {
     expect(spoke.rest.git.getRef).toHaveBeenCalledWith(expect.objectContaining({ ref: 'heads/master' }))
     expect(spoke.rest.pulls.create).toHaveBeenCalledWith(expect.objectContaining({ base: 'master' }))
     expect(robot.errorSpy).not.toHaveBeenCalled()
+  })
+
+  describe('post-merge source snapshot', () => {
+    it.each(['organization', 'globals'])('reads all %s source files at the merge SHA', async kind => {
+      const spoke = makeSpokeClient('master')
+      const robot = makeRobot(spoke)
+      const file = kind === 'organization'
+        ? '.github/safe-settings/organizations/spoke-org/repos/my-repo.yml'
+        : '.github/safe-settings/globals/suborgs.yml'
+      const context = makeContext(file)
+
+      if (kind === 'organization') {
+        await syncHubOrgUpdate(robot, context, 'spoke-org', 'admin', '.github')
+      } else {
+        await syncHubGlobalsUpdate(robot, context, [{ filename: file }])
+      }
+
+      expect(context.octokit.rest.repos.getContent).toHaveBeenCalledWith(expect.objectContaining({ path: file, ref: 'hub-merge-sha' }))
+      for (const [params] of context.octokit.rest.repos.getContent.mock.calls) {
+        expect(params.ref).toBe('hub-merge-sha')
+      }
+      expect(spoke.rest.repos.createOrUpdateFileContents).toHaveBeenCalled()
+      expect(robot.errorSpy).not.toHaveBeenCalled()
+    })
+
+    it.each(['organization', 'globals'])('generates %s settings from merged globals and organization content', async kind => {
+      const spoke = makeSpokeClient('master')
+      const robot = makeRobot(spoke)
+      const root = '.github/safe-settings'
+      const file = kind === 'organization'
+        ? `${root}/organizations/spoke-org/settings.yml`
+        : `${root}/globals/settings.yml`
+      const context = makeContext(file)
+      context.octokit.rest.repos.getContent.mockImplementation(async ({ path, ref }) => {
+        expect(ref).toBe('hub-merge-sha')
+        if (path.endsWith('/manifest.yml')) throw notFound()
+        if (path === `${root}/organizations`) {
+          return { data: [{ type: 'dir', name: 'spoke-org' }] }
+        }
+        const content = path === `${root}/globals/settings.yml`
+          ? 'repository:\n  has_issues: false\n'
+          : 'repository:\n  description: org policy\n'
+        return { data: { content: Buffer.from(content).toString('base64'), encoding: 'base64' } }
+      })
+
+      if (kind === 'organization') {
+        await syncHubOrgUpdate(robot, context, 'spoke-org', 'admin', '.github')
+      } else {
+        await syncHubGlobalsUpdate(robot, context, [{ filename: file }])
+      }
+
+      expect(spoke.rest.repos.createOrUpdateFileContents).toHaveBeenCalled()
+      const written = spoke.rest.repos.createOrUpdateFileContents.mock.calls[0][0]
+      const output = Buffer.from(written.content, 'base64').toString('utf8')
+      expect(output).toContain('has_issues: false')
+      expect(output).toContain('description: org policy')
+      for (const [params] of context.octokit.rest.repos.getContent.mock.calls) {
+        expect(params.ref).toBe('hub-merge-sha')
+      }
+      expect(robot.errorSpy).not.toHaveBeenCalled()
+    })
+
+    function routedContext () {
+      const context = makeContext('.github/safe-settings/organizations/spoke-org/settings.yml')
+      context.payload.repository = { name: 'hub-repo', owner: { login: 'hub-org' } }
+      context.octokit.paginate.mockResolvedValue([
+        { filename: '.github/safe-settings/globals/settings.yml' },
+        { filename: '.github/safe-settings/organizations/spoke-org/settings.yml' }
+      ])
+      return context
+    }
+
+    it('resolves a missing merge SHA once and passes it to both sync paths', async () => {
+      const robot = makeRobot(makeSpokeClient('master'))
+      const context = routedContext()
+      delete context.payload.pull_request.merge_commit_sha
+      context.octokit.rest.pulls.get = jest.fn().mockResolvedValue({
+        data: { merged: true, merge_commit_sha: 'fetched-merge-sha' }
+      })
+      const globals = jest.spyOn(hubSync, 'syncHubGlobalsUpdate').mockResolvedValue()
+      const org = jest.spyOn(hubSync, 'syncHubOrgUpdate').mockResolvedValue()
+
+      await hubSync.hubSyncHandler(robot, context)
+
+      expect(context.octokit.rest.pulls.get).toHaveBeenCalledTimes(1)
+      expect(context.octokit.rest.pulls.get).toHaveBeenCalledWith({ owner: 'hub-org', repo: 'hub-repo', pull_number: 7 })
+      expect(globals).toHaveBeenCalledWith(robot, context, expect.any(Array), 'fetched-merge-sha')
+      expect(org).toHaveBeenCalledWith(robot, context, 'spoke-org', 'admin', '.github', 'fetched-merge-sha')
+      expect(context.octokit.paginate).toHaveBeenCalledWith(context.octokit.rest.pulls.listFiles, {
+        owner: 'hub-org', repo: 'hub-repo', pull_number: 7, per_page: 100
+      })
+    })
+
+    it.each(['missing', 'API failure'])('aborts explicitly when merge SHA resolution fails: %s', async mode => {
+      const robot = makeRobot(makeSpokeClient('master'))
+      const context = routedContext()
+      delete context.payload.pull_request.merge_commit_sha
+      context.octokit.rest.pulls.get = mode === 'missing'
+        ? jest.fn().mockResolvedValue({ data: { merged: true, merge_commit_sha: null } })
+        : jest.fn().mockRejectedValue(new Error('GitHub unavailable'))
+      const globals = jest.spyOn(hubSync, 'syncHubGlobalsUpdate').mockResolvedValue()
+      const org = jest.spyOn(hubSync, 'syncHubOrgUpdate').mockResolvedValue()
+
+      await hubSync.hubSyncHandler(robot, context)
+
+      expect(globals).not.toHaveBeenCalled()
+      expect(org).not.toHaveBeenCalled()
+      expect(context.octokit.paginate).not.toHaveBeenCalled()
+      expect(robot.errorSpy).toHaveBeenCalledWith(expect.stringContaining(
+        mode === 'missing' ? 'Could not determine the merge commit SHA' : 'GitHub unavailable'
+      ))
+    })
   })
 })
