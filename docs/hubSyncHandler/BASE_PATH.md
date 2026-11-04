@@ -42,7 +42,7 @@ SAFE_SETTINGS_HUB_URL_PREFIX=
 
 ### 2. Rebuild the UI
 
-After changing the SAFE_SETTINGS_HUB_URL_PREFIX, you must rebuild the Next.js UI:
+After changing SAFE_SETTINGS_HUB_URL_PREFIX, you must rebuild the Next.js UI. Next.js reads `.env` files from `ui/`, not the repository root, so export `SAFE_SETTINGS_HUB_URL_PREFIX` into the build shell (or set it in `ui/.env.local`) with the same value used by the backend before running these commands:
 
 ```bash
 cd ui

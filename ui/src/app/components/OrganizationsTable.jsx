@@ -454,10 +454,11 @@ const OrganizationsTable = ({ organizations: propOrganizations = [] }) => {
               <th
                 className="theme-text-primary sortable-header"
                 style={{ cursor: "pointer", ...lastSyncColStyle }}
-                onClick={() => handleSort("lastSyncDate")}
               >
-                Last Sync
-                {renderSortIcon("lastSyncDate")}
+                <button type="button" className="btn btn-link p-0 text-reset text-decoration-none" onClick={() => handleSort("lastSyncDate")}>
+                  Last Sync
+                  {renderSortIcon("lastSyncDate")}
+                </button>
               </th>
             </tr>
           </thead>

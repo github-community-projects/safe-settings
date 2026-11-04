@@ -47,10 +47,17 @@ Deploy Safe Settings on a VM (AWS EC2, Azure VM, Google Compute Engine, etc.):
 #### Option 2: Container Deployment
 Deploy using Docker:
 
-1. Use the provided `Dockerfile` or `docker-compose.yml`
-2. Build and run the container:
+1. Build the UI using the steps in **Build the UI** below, with the same URL prefix as the backend.
+2. Create `docker-compose.override.yml` in the repository root to mount the export at the path expected by the backend:
+   ```yaml
+   services:
+     probot:
+       volumes:
+         - ./ui/out:/opt/safe-settings/ui/out:ro
+   ```
+3. Build and run the container with both Compose files:
    ```bash
-   docker-compose up -d
+   docker-compose -f docker-compose.yml -f docker-compose.override.yml up -d --build
    ```
 
 #### Option 3: Serverless Deployment
