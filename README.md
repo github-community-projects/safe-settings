@@ -870,6 +870,9 @@ code_scanning:
 
 - Only the fields you declare are compared and sent; the others are left to
   GitHub. The order of `languages` does not matter.
+- A `languages` list replaces the one inherited from a lower layer instead of
+  being merged with it, so a suborg or repo can narrow the list, or clear it
+  with `languages: []`.
 - With `state: not-configured`, only the state is compared and applied.
 - Private and internal repositories need GitHub Code Security (or GitHub
   Advanced Security). Without it GitHub rejects the update, and safe-settings

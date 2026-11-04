@@ -1059,6 +1059,29 @@ repository:
         expect(pluginConfig('bar').default_setup).toEqual({ state: 'configured', query_suite: 'extended' })
       })
 
+      it('replaces inherited code_scanning languages instead of concatenating them', () => {
+        const settings = createSettings({
+          code_scanning: { default_setup: { state: 'configured', languages: ['csharp', 'actions'] } }
+        })
+        settings.subOrgConfigs = {
+          'team-repo': {
+            code_scanning: { default_setup: { languages: ['actions', 'python'] } },
+            source: '.github/suborgs/team.yml'
+          }
+        }
+        settings.repoConfigs = {
+          'narrow.yml': { code_scanning: { default_setup: { languages: ['csharp'] } } },
+          'clear.yml': { code_scanning: { default_setup: { languages: [] } } },
+          'team-repo.yml': { code_scanning: { default_setup: { query_suite: 'extended' } } }
+        }
+        const defaultSetup = (repo) => settings.childPluginsList({ repo })
+          .find(([, , section]) => section === 'code_scanning')[1].default_setup
+        expect(defaultSetup('narrow')).toEqual({ state: 'configured', languages: ['csharp'] })
+        expect(defaultSetup('clear')).toEqual({ state: 'configured', languages: [] })
+        expect(defaultSetup('other')).toEqual({ state: 'configured', languages: ['csharp', 'actions'] })
+        expect(defaultSetup('team-repo')).toEqual({ state: 'configured', query_suite: 'extended', languages: ['actions', 'python'] })
+      })
+
       it('18. org target:children for variables: org-level variables still run per-repo (documented nuance)', () => {
         // target:children strips from suborg+repo only; merged repo plugin
         // config still inherits the org-level variables → plugin DOES run.

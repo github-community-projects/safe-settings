@@ -74,6 +74,14 @@ describe('CodeScanning', () => {
       })
     })
 
+    it('ignores duplicate languages when comparing', async () => {
+      currentSetup({ state: 'configured', languages: ['actions', 'csharp'] })
+
+      await configure({ default_setup: { state: 'configured', languages: ['csharp', 'actions', 'csharp'] } }).sync()
+
+      expect(github.rest.codeScanning.updateDefaultSetup).not.toHaveBeenCalled()
+    })
+
     it('updates when the configured languages differ', async () => {
       currentSetup({ state: 'configured', languages: ['csharp'], query_suite: 'default' })
 
@@ -114,6 +122,24 @@ describe('CodeScanning', () => {
     })
   })
 
+  describe('declaredLanguages', () => {
+    it('returns the languages of the highest-priority layer that declares them', () => {
+      expect(CodeScanning.declaredLanguages([
+        { default_setup: { languages: ['csharp', 'actions'] } },
+        { default_setup: { state: 'configured' } },
+        { default_setup: { languages: ['csharp'] } }
+      ])).toEqual(['csharp'])
+    })
+
+    it('keeps an empty list so a layer can clear the inherited languages', () => {
+      expect(CodeScanning.declaredLanguages([{ default_setup: { languages: ['csharp'] } }, undefined, { default_setup: { languages: [] } }])).toEqual([])
+    })
+
+    it('returns undefined when no layer declares languages', () => {
+      expect(CodeScanning.declaredLanguages([undefined, {}, { default_setup: { state: 'configured' } }])).toBeUndefined()
+    })
+  })
+
   describe('nop', () => {
     it('reports the change without updating', async () => {
       currentSetup({ state: 'not-configured', languages: [] })
@@ -122,6 +148,7 @@ describe('CodeScanning', () => {
 
       expect(github.rest.codeScanning.updateDefaultSetup).not.toHaveBeenCalled()
       expect(results).toHaveLength(1)
+      expect(results[0].plugin).toBe('code_scanning')
       expect(results[0].type).toBe('INFO')
       expect(results[0].action.modifications).toEqual({ state: 'configured', languages: ['csharp'] })
       expect(results[0].body).toEqual({ ...repo, state: 'configured', languages: ['csharp'] })
@@ -133,6 +160,7 @@ describe('CodeScanning', () => {
       const results = await configure({ default_setup: { state: 'configured' } }, true).sync()
 
       expect(results).toHaveLength(1)
+      expect(results[0].plugin).toBe('code_scanning')
       expect(results[0].type).toBe('ERROR')
       expect(errors).toHaveLength(0)
     })
