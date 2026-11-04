@@ -93,6 +93,21 @@ describe.each(files)('%s schema', file => {
     expect(validate({ rulesets: [entry] })).toBe(false)
   })
 
+  it('accepts a code scanning default setup', () => {
+    expect(validate({
+      code_scanning: { default_setup: { state: 'configured', query_suite: 'extended', threat_model: 'remote', languages: ['csharp', 'actions'] } }
+    })).toBe(true)
+  })
+
+  it.each([
+    ['unknown state', { default_setup: { state: 'enabled' } }],
+    ['unknown language', { default_setup: { state: 'configured', languages: ['cobol'] } }],
+    ['unknown default_setup field', { default_setup: { state: 'configured', enabled: true } }],
+    ['unknown code_scanning field', { advanced_setup: {} }]
+  ])('rejects a code scanning config with %s', (_label, codeScanning) => {
+    expect(validate({ code_scanning: codeScanning })).toBe(false)
+  })
+
   it('accepts nullable bypass actor IDs and name/slug aliases', () => {
     const entry = {
       ...validRuleset,

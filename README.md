@@ -585,7 +585,7 @@ plugins for a given scope. Each entry is either:
 Valid plugin names: `repository`, `labels`, `collaborators`, `teams`,
 `milestones`, `branches`, `autolinks`, `validator`, `rulesets`, `environments`,
 `custom_properties`, `custom_repository_roles`, `variables`, `archive`,
-`app_installations`.
+`app_installations`, `code_scanning`.
 
 #### Strip matrix (which source layers are removed before merge)
 
@@ -847,6 +847,40 @@ still selects them.
 `app_installations` honors both [`disable_plugins`](#disabling-plugins-disable_plugins)
 and [`additive_plugins`](#additive-plugins-additive_plugins). In additive mode
 the plugin only **adds** repos to installations and never removes them.
+
+### Code scanning default setup (`code_scanning`)
+
+The `code_scanning` plugin manages a repository's
+[CodeQL default setup](https://docs.github.com/en/code-security/code-scanning/enabling-code-scanning/configuring-default-setup-for-code-scanning).
+Like other repository settings, it can be declared in `settings.yml`, a suborg
+file or a repo file, and later layers override earlier ones.
+
+```yml
+code_scanning:
+  default_setup:
+    state: configured            # or not-configured
+    query_suite: extended        # default | extended
+    threat_model: remote         # remote | remote_and_local
+    languages:                   # omit to let GitHub analyze the languages it detects
+      - csharp
+      - actions
+    # runner_type: labeled       # standard | labeled
+    # runner_label: code-scanning
+```
+
+- Only the fields you declare are compared and sent; the others are left to
+  GitHub. The order of `languages` does not matter.
+- A `languages` list replaces the one inherited from a lower layer instead of
+  being merged with it, so a suborg or repo can narrow the list, or clear it
+  with `languages: []`.
+- With `state: not-configured`, only the state is compared and applied.
+- Private and internal repositories need GitHub Code Security (or GitHub
+  Advanced Security). Without it GitHub rejects the update, and safe-settings
+  records the error for that repository and carries on with the others.
+
+The plugin can be turned off with
+[`disable_plugins`](#disabling-plugins-disable_plugins). It is not an additive
+plugin.
 
 ### The Settings Files
 
