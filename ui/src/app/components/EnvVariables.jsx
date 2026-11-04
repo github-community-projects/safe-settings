@@ -125,16 +125,17 @@ export default function EnvVariables() {
             <tbody className="small">
               {sorted.map(r => {
                 const sensitive = SENSITIVE_REGEX.test(r.key);
+                const value = r.value == null ? '' : String(r.value);
                 return (
                   <tr key={r.key} className="theme-border-top" style={{ background: 'var(--bg-primary)' }}>
                     <td className="fw-semibold text-break"><code>{r.key}</code></td>
                     <td className="text-break" style={{ maxWidth: 350 }}>
-                      <code>{maskedValue(r.key, r.value)}</code>
+                      <code>{maskedValue(r.key, value)}</code>
                     </td>
                     <td className="text-break theme-text-secondary">{r.description || 'NA'}</td>
                     <td className="text-center">{sensitive && <ShieldIcon size={14} className="text-warning" />}</td>
                     <td className="text-center">
-                      <button className="btn btn-sm btn-link p-0" title="Copy value" onClick={() => copyToClipboard(r.value)}><CopyIcon size={14} /></button>
+                      <button className="btn btn-sm btn-link p-0" title="Copy value" onClick={() => copyToClipboard(value)}><CopyIcon size={14} /></button>
                     </td>
                   </tr>
                 );
