@@ -19,6 +19,7 @@
     "test:unit:ci": "npm run test:unit --reporters=default --reporters=github-actions",
     "test:me": "jest ",
     "test:unit:watch": "npm run test:unit -- --watch",
+    "test:unit:hub": "jest test/unit/lib/hubSyncHandler test/unit/routes-sync-status test/unit/index-config-errors",
     "test:integration": "node --test --test-reporter=spec \"test/integration/**/*.test.js\"",
     "test:integration:ci": "mkdir -p reports && node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=reports/integration-junit.xml \"test/integration/**/*.test.js\"",
     "test:pagination": "node --test test/integration/transport/variables.test.js",
@@ -27,7 +28,10 @@
     "integration:live:comment-markup": "node test/live/comment-markup.js",
     "smoke-test": "node smoke-test.js",
     "smoke-test:interactive": "node smoke-test.js --interactive",
-    "smoke-test:phase": "node smoke-test.js --phase"
+    "smoke-test:phase": "node smoke-test.js --phase",
+    "smoke-test:hub": "node smoke-test-hub-sync.js",
+    "smoke-test:hub:interactive": "node smoke-test-hub-sync.js --interactive",
+    "smoke-test:hub:teardown": "node smoke-test-hub-sync.js --teardown-only"
   },
   "author": "Yadhav Jayaraman",
   "license": "ISC",

@@ -1,0 +1,174 @@
+/* TitleBar Component-Specific Styles */
+
+/* Header styles */
+.title-header {
+  background: #333;
+  color: #fff;
+  min-height: 40px; /* Ensure consistent height */
+}
+
+/* Theme-specific header styles */
+[data-theme="light"] .title-header,
+body.light-theme .title-header {
+  background: #333;
+  color: #fff;
+}
+
+[data-theme="dark"] .title-header,
+body.dark-theme .title-header {
+  background: #161b22;
+  color: #f0f6fc;
+}
+
+/* Navigation bar - consistent height and styling */
+.title-nav {
+  min-height: 40px; /* Consistent nav height */
+  border-bottom: 1px solid var(--border-color, #dee2e6) !important;
+  background: var(--bg-secondary, #f6f8fa); /* Default light theme background */
+}
+
+/* Data-theme selectors for immediate theme application */
+[data-theme="light"] .title-nav,
+body.light-theme .title-nav {
+  background: #f6f8fa;
+  color: #24292f;
+  border-bottom: 1px solid #dee2e6 !important;
+}
+
+[data-theme="dark"] .title-nav,
+body.dark-theme .title-nav {
+  background: #22272e;
+  color: #f6f8fa;
+  border-bottom: 1px solid #666a6e !important;
+}
+
+/* Theme toggle button */
+.theme-toggle-btn {
+  border: none !important;
+  background: transparent !important;
+  cursor: pointer !important;
+  padding: 2px !important;
+  border-radius: 6px !important;
+}
+
+.theme-toggle-btn .theme-toggle-icon {
+  transition: color 0.15s;
+  color: lightgray; /* Default icon color */
+}
+
+/* Theme-specific toggle button styles */
+[data-theme="light"] .theme-toggle-btn .theme-toggle-icon,
+body.light-theme .theme-toggle-btn .theme-toggle-icon {
+  color: #fff;
+}
+
+[data-theme="dark"] .theme-toggle-btn .theme-toggle-icon,
+body.dark-theme .theme-toggle-btn .theme-toggle-icon {
+  color: #f0f6fc;
+}
+
+[data-theme="light"] .theme-toggle-btn:hover,
+body.light-theme .theme-toggle-btn:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+}
+
+[data-theme="dark"] .theme-toggle-btn:hover,
+body.dark-theme .theme-toggle-btn:hover {
+  background: rgba(240, 246, 252, 0.1) !important;
+}
+
+.theme-toggle-btn:hover .theme-toggle-icon,
+.theme-toggle-btn:focus .theme-toggle-icon {
+  color: yellow; /* Hover icon color */
+}
+
+/* Navigation links */
+.nav-link-custom {
+  border: none;
+}
+
+/* Light theme nav links */
+[data-theme="light"] .nav-link-custom,
+body.light-theme .nav-link-custom {
+  color: #24292f !important;
+}
+
+/* Dark theme nav links */
+[data-theme="dark"] .nav-link-custom,
+body.dark-theme .nav-link-custom {
+  color: #f6f8fa;
+}
+
+/* Navigation menu items */
+.nav-link.menu-hover {
+  border-radius: 5px !important;
+  margin: 10px 10px 9px 10px !important;
+  padding: 5px 10px !important;
+  transition: background 0.15s, color 0.15s;
+  border: 1px solid transparent !important; /* Invisible border to maintain box model */
+}
+
+.nav-link.menu-hover:hover {
+  background: var(--bg-accent) !important;
+  border-radius: 5px !important;
+  border: 1px solid transparent !important; /* Keep same border width */
+}
+
+/* Theme-specific hover colors */
+[data-theme="light"] .nav-link.menu-hover:hover,
+body.light-theme .nav-link.menu-hover:hover {
+  background-color: #eaecef !important;
+}
+
+[data-theme="dark"] .nav-link.menu-hover:hover,
+body.dark-theme .nav-link.menu-hover:hover {
+  background-color: #30363d !important;
+}
+
+/* Override Bootstrap's default nav-tabs border-radius */
+.nav-tabs .nav-link {
+  border-radius: 5px !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.nav-tabs .nav-link:hover {
+  border-radius: 5px !important;
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.nav-tabs .nav-link:focus-visible {
+  outline: 2px solid currentColor !important;
+  outline-offset: 2px;
+  box-shadow: none !important;
+}
+
+.nav-tabs .nav-link:active {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.nav-tabs {
+  border-top: none;
+  border-bottom: none;
+}
+
+.menu-hover.active {
+  background: transparent;
+  border: none !important;
+}
+
+/* Active menu indicator */
+.menu-active-indicator {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -10px;
+  height: 2px;
+  background: rgb(253, 140, 115);  /* Orange-red underline color */
+  border-radius: 1px;
+}
