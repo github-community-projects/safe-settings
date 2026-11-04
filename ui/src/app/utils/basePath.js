@@ -1,6 +1,6 @@
 /**
  * URL prefix utility for handling deployment behind proxies
- * Reads from Next.js basePath configuration
+ * Reads the public build-time prefix shared with next.config.js
  */
 
 // Normalize URL prefix: add leading '/' if missing, treat '/' as empty for root
@@ -9,11 +9,10 @@ const normalizePrefix = (prefix) => {
   return prefix.startsWith('/') ? prefix : `/${prefix}`;
 };
 
-// Next.js automatically handles basePath for routing and asset loading
-// We expose this for manual link construction (URL prefix in browser)
-export const BASE_PATH = typeof window !== 'undefined'
-  ? normalizePrefix(window.__NEXT_DATA__?.basePath ?? '/safe-settings')
-  : normalizePrefix(process.env.NEXT_PUBLIC_SAFE_SETTINGS_HUB_URL_PREFIX ?? process.env.SAFE_SETTINGS_HUB_URL_PREFIX ?? '/safe-settings');
+// Next.js handles routing and assets; this is for manual URL construction.
+export const BASE_PATH = normalizePrefix(
+  process.env.NEXT_PUBLIC_SAFE_SETTINGS_HUB_URL_PREFIX ?? '/safe-settings'
+);
 
 /**
  * Prepend base path to a URL

@@ -10,6 +10,9 @@ const basePath = normalizePrefix(process.env.SAFE_SETTINGS_HUB_URL_PREFIX === un
 const nextConfig = {
   output: "export",
   basePath: basePath,
+  env: {
+    NEXT_PUBLIC_SAFE_SETTINGS_HUB_URL_PREFIX: basePath,
+  },
   // Disable Next.js ESLint checks during builds
   eslint: {
     ignoreDuringBuilds: true,
