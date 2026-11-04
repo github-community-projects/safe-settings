@@ -1,4 +1,5 @@
 const CodeScanning = require('../../../../lib/plugins/code_scanning')
+const { isEmptyChange } = require('../../../../lib/settings')
 
 describe('CodeScanning', () => {
   const repo = { owner: 'owner', repo: 'repo' }
@@ -152,6 +153,21 @@ describe('CodeScanning', () => {
       expect(results[0].type).toBe('INFO')
       expect(results[0].action.modifications).toEqual({ state: 'configured', languages: ['csharp'] })
       expect(results[0].body).toEqual({ ...repo, state: 'configured', languages: ['csharp'] })
+    })
+
+    it.each([
+      ['languages', { languages: ['csharp'] }, { languages: [] }, ['csharp']],
+      ['runner_label', { runner_type: 'labeled', runner_label: 'code-scanning' }, { runner_label: null }, 'code-scanning']
+    ])('reports clearing %s as a deletion the report keeps', async (field, current, cleared, previous) => {
+      currentSetup({ state: 'configured', ...current })
+
+      const results = await configure({ default_setup: { state: 'configured', ...cleared } }, true).sync()
+
+      expect(results).toHaveLength(1)
+      expect(results[0].action.modifications).toEqual({})
+      expect(results[0].action.deletions).toEqual({ [field]: previous })
+      expect(results[0].body).toEqual({ ...repo, state: 'configured', ...cleared })
+      expect(isEmptyChange(results[0].action)).toBe(false)
     })
 
     it('reports errors as ERROR results', async () => {
