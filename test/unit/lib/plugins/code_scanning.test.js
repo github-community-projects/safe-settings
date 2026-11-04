@@ -152,6 +152,7 @@ describe('CodeScanning', () => {
       expect(results[0].plugin).toBe('code_scanning')
       expect(results[0].type).toBe('INFO')
       expect(results[0].action.modifications).toEqual({ state: 'configured', languages: ['csharp'] })
+      expect(results[0].action.deletions).toEqual({ state: 'not-configured', languages: [] })
       expect(results[0].body).toEqual({ ...repo, state: 'configured', languages: ['csharp'] })
     })
 
