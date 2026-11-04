@@ -134,6 +134,24 @@ Any settings file in the `organizations/<ORG>` directory will be synced to the s
 
 These two options only require that you provide the files you would like to sync, in the correct sub-directory.
 
+#### How `settings.yml` is merged (globals + organization)
+
+For `settings.yml`, the spoke file is **generated**: `globals/settings.yml` is merged with `organizations/<ORG>/settings.yml`, and the organization file takes precedence. Because of this:
+
+- **Deleting a section from the organization file does not remove it from the spoke.** If globals defines the same section, the organization inherits it again. The Hub-Sync PR check warns about this.
+- **To stop inheriting a section from globals, set it to `null` in the organization file:**
+
+  ```yaml
+  # organizations/my-org/settings.yml
+  branches: null   # my-org does not inherit globals' branch protection settings
+  ```
+
+  Hub-Sync drops the section from the generated spoke file, and the PR check lists it under *Inheritance Overrides*. Safe-Settings then no longer manages that section for the organization; it does **not** delete existing settings on GitHub.
+- An empty list (`branches: []`) does **not** opt out. Lists are merged, so the globals entries remain.
+- To **actively remove** something (for example, branch protection), configure it explicitly. For example, `protection: null` on a branch entry in `branches` deletes that branch's protection.
+- Only top-level sections can be opted out this way. Removing individual list entries (a single label or ruleset, for example) that globals defines requires changing globals.
+- List entries are matched by identity (`name`, `username`, `login`, `title`, `key_prefix`, `context`, `actor_type`+`actor_id`, `type`+`id`, or `type`). Matching entries are merged, with the organization's values winning; nested lists are merged the same way. Exact duplicates are not added, so repeating a globals entry in the organization file is harmless.
+
 #### ✅ Step 5.1: Configure the `manifest.yml` in the 'Master' Safe-Settings Admin Config Repo (Hub)
 
 The `manifest.yml` defines the sync rules for global settings distribution.
@@ -307,6 +325,15 @@ The following table summarizes the Safe Settings API endpoints:
 | `/api/safe-settings/hub/content/*`       | GET    | Fetch specific file or directory from hub repo        | Get file content |
 | `/api/safe-settings/hub/import`          | POST   | Import settings from orgs into the hub                | Import org settings |
 | `/api/safe-settings/app/env`             | GET    | App environment/config variables                      | Get env vars |
+
+When activity is enabled, installation sync status compares the hub's
+organization configuration tree, including nested `repos/` and `suborgs/`
+directories, against the corresponding relative paths under the organization's
+`CONFIG_PATH`. The root `settings.yml` is compared with the generated output
+from the hub's global and organization settings, including Hub-Sync's generated
+header. Missing or differing managed files, or errors reading managed content,
+prevent `isInSync` from being `true`. Extra files that exist only in the
+organization repository do not affect the comparison.
 
 **Examples:**
 - Fetch org installation status:

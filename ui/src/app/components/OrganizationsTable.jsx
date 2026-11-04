@@ -52,6 +52,8 @@ const OrganizationsTable = ({ organizations: propOrganizations = [] }) => {
   const [retrieveMessage, setRetrieveMessage] = useState(null);
   const [retrieveError, setRetrieveError] = useState(null);
   const [retrieveResults, setRetrieveResults] = useState(null);
+  const [hubSync, setHubSync] = useState(null);
+  const syncUnavailable = hubSync && hubSync.status !== "available";
 
   // Fetch real organizations from backend API on client hydration
   useEffect(() => {
@@ -82,6 +84,7 @@ const OrganizationsTable = ({ organizations: propOrganizations = [] }) => {
           isInSync: typeof i.isInSync === "boolean" ? i.isInSync : false,
         }));
         setFetched(mapped);
+        setHubSync(json.hubSync || null);
         setError(null);
       })
       .catch((e) => {
@@ -383,6 +386,13 @@ const OrganizationsTable = ({ organizations: propOrganizations = [] }) => {
       </div>
 
       {/* Table */}
+      {syncUnavailable && (
+        <div className="alert alert-info py-2 small" role="status">
+          {hubSync.status === "hub_not_installed"
+            ? `Sync status can't be checked because the Safe-Settings app isn't installed on the Hub organization '${hubSync.org}'.`
+            : "Sync status will appear here once Safe-Settings Hub is set up. Until then, organizations aren't compared with the Hub configuration."}
+        </div>
+      )}
       <div className="table-responsive">
         <table className="table table-hover theme-bg-primary">
           <thead className="theme-bg-secondary">
@@ -523,7 +533,14 @@ const OrganizationsTable = ({ organizations: propOrganizations = [] }) => {
                         )}
                       </td>
                       <td style={{ textAlign: "center" }}>
-                        {org.isInSync ? (
+                        {syncUnavailable ? (
+                          <span
+                            className="text-muted"
+                            title="Sync status is unavailable until Safe-Settings Hub is set up"
+                          >
+                            —
+                          </span>
+                        ) : org.isInSync ? (
                           <span className="text-success" title="In sync">
                             ✓
                           </span>

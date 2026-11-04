@@ -8,6 +8,7 @@ describe('configuration read error reporting', () => {
   let handlers
   let github
   let context
+  let listedFiles
 
   beforeEach(() => {
     jest.replaceProperty(process, 'env', { ...process.env, CRON: '', GH_ENTERPRISE: '' })
@@ -19,15 +20,16 @@ describe('configuration read error reporting', () => {
     jest.spyOn(fs, 'existsSync').mockReturnValue(false)
     handlers = new Map()
     const installation = { id: 123, account: { login: 'test-org' } }
+    listedFiles = [{ filename: Settings.FILE_PATH }]
     github = {
-      paginate: jest.fn().mockResolvedValue([installation]),
+      paginate: jest.fn(async route => route === github.rest.pulls.listFiles ? listedFiles : [installation]),
       rest: {
         apps: {
           listInstallations: { endpoint: { merge: jest.fn().mockReturnValue({}) } },
           getAuthenticated: jest.fn().mockResolvedValue({ data: { slug: 'safe-settings' } })
         },
         repos: { getContent: jest.fn() },
-        pulls: { listFiles: jest.fn().mockResolvedValue({ data: [{ filename: Settings.FILE_PATH }] }) },
+        pulls: { listFiles: jest.fn() },
         checks: { update: jest.fn().mockResolvedValue({}) },
         issues: { createComment: jest.fn().mockResolvedValue({}) }
       }
@@ -112,5 +114,59 @@ describe('configuration read error reporting', () => {
       expect(output).toContain(error.message)
       expect(output).not.toContain('TypeError')
     }
+  })
+  describe('pull request file pagination', () => {
+    const unrelated = count => Array.from({ length: count }, (_, i) => ({ filename: `docs/file-${i}.md` }))
+    const completedCheck = () => github.rest.checks.update.mock.calls.map(c => c[0]).find(p => p.status === 'completed')
+
+    it('requests every page of changed files', async () => {
+      listedFiles = unrelated(3)
+
+      await handlers.get('check_run.created')(context)
+
+      expect(github.paginate).toHaveBeenCalledWith(github.rest.pulls.listFiles, {
+        owner: 'test-org',
+        repo: 'admin',
+        pull_number: 1,
+        per_page: 100
+      })
+      expect(github.rest.pulls.listFiles).not.toHaveBeenCalled()
+    })
+
+    it('validates a settings change that appears after the first page', async () => {
+      listedFiles = [...unrelated(150), { filename: Settings.FILE_PATH }]
+      github.rest.repos.getContent.mockRejectedValue(Object.assign(new Error('Forbidden'), { status: 403 }))
+      const handleError = jest.spyOn(Settings, 'handleError')
+
+      await handlers.get('check_run.created')(context)
+      await handleError.mock.results[0]?.value
+
+      expect(github.rest.repos.getContent).toHaveBeenCalledWith(expect.objectContaining({ path: '.github/settings.yml', ref: 'config-change' }))
+      expect(completedCheck()).not.toMatchObject({ conclusion: 'success' })
+    })
+
+    it('still reports success when no Safe-settings files changed', async () => {
+      listedFiles = unrelated(150)
+
+      await handlers.get('check_run.created')(context)
+
+      expect(github.rest.repos.getContent).not.toHaveBeenCalled()
+      expect(completedCheck()).toMatchObject({
+        conclusion: 'success',
+        output: { title: 'No Safe-settings changes detected' }
+      })
+    })
+
+    it('does not report success when listing changed files fails', async () => {
+      const error = new Error('List files failed')
+      github.paginate.mockImplementation(async route => {
+        if (route === github.rest.pulls.listFiles) throw error
+        return []
+      })
+
+      await expect(handlers.get('check_run.created')(context)).rejects.toBe(error)
+
+      expect(completedCheck()).toBeUndefined()
+    })
   })
 })

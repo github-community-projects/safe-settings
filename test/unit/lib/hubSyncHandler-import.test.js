@@ -31,6 +31,7 @@ describe('retrieveSettingsFromOrgs', () => {
     const hubClient = {
       rest: {
         repos: {
+          get: jest.fn().mockResolvedValue({ data: { default_branch: 'trunk' } }),
           getContent: jest.fn().mockRejectedValue(Object.assign(new Error('Not Found'), { status: 404 }))
         },
         git: {
@@ -52,6 +53,7 @@ describe('retrieveSettingsFromOrgs', () => {
           getRef: jest.fn().mockResolvedValue({ data: { object: { sha: 'source-sha' } } })
         },
         repos: {
+          get: jest.fn().mockResolvedValue({ data: { default_branch: 'master' } }),
           getContent: jest.fn()
             .mockResolvedValueOnce({
               data: [{ type: 'file', path: '.github/settings.yml' }]
@@ -82,6 +84,10 @@ describe('retrieveSettingsFromOrgs', () => {
     const results = await retrieveSettingsFromOrgs(robot, ['source-org'])
 
     expect(sourceClient.rest.repos.getContent).toHaveBeenCalledTimes(2)
+    expect(sourceClient.rest.git.getRef).toHaveBeenCalledWith(expect.objectContaining({ repo: 'admin', ref: 'heads/master' }))
+    expect(sourceClient.rest.repos.getContent).toHaveBeenCalledWith(expect.objectContaining({ ref: 'master' }))
+    expect(hubClient.rest.git.getRef).toHaveBeenCalledWith(expect.objectContaining({ repo: 'hub-repo', ref: 'heads/trunk' }))
+    expect(hubClient.rest.pulls.create).toHaveBeenCalledWith(expect.objectContaining({ base: 'trunk' }))
     expect(hubClient.rest.git.createTree).toHaveBeenCalledWith(expect.objectContaining({
       tree: [expect.objectContaining({
         path: '.github/safe-settings/organizations/source-org/settings.yml',

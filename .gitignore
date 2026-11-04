@@ -143,3 +143,6 @@ samconfig.toml
 # test file to be ignored
 test.log
 reports
+
+# Hub-Sync smoke test teardown registry
+.smoke-hub-sync-state.json

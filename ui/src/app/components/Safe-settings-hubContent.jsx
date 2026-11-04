@@ -22,12 +22,21 @@ export default function SafeSettingsHubContent3b() {
     if (!hydrated) return;
     setLoading(true); setError(null);
     fetch(withBasePath('/api/safe-settings/hub/content?fetchContent=true'))
-      .then(r => {
-        if (!r.ok) throw new Error(`Unable to retrieve safe-settings hub content (HTTP ${r.status})`);
+      .then(async r => {
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          throw Object.assign(new Error(body.error || `HTTP ${r.status}`), { body });
+        }
         return r.json();
       })
       .then(json => { setRootTree(json); setLastFetchedAt(new Date()); })
-      .catch((error) => { setError("Unable to load content. Please try again later."); setRootTree(null); })
+      .catch((err) => {
+        const body = err.body || {};
+        setError(body.code
+          ? { setup: true, title: body.error, message: body.message }
+          : { message: 'Unable to load content. Please try again later.' });
+        setRootTree(null);
+      })
       .finally(() => setLoading(false));
   };
 
@@ -183,8 +192,15 @@ export default function SafeSettingsHubContent3b() {
       </div>
 
       {loading && <div className="py-4 text-center theme-text-secondary">Loading…</div>}
-      {error && <div className="alert alert-danger">{error}</div>}
-      {!loading && !displayTree && <div className="py-4 text-center theme-text-secondary">No entries</div>}
+      {error && (error.setup
+        ? (
+          <div className="alert alert-info">
+            <strong>{error.title}</strong>
+            <div className="mt-1">{error.message}</div>
+          </div>
+          )
+        : <div className="alert alert-danger">{error.message}</div>)}
+      {!loading && !displayTree && !error?.setup && <div className="py-4 text-center theme-text-secondary">No entries</div>}
 
       {!loading && displayTree && (
         <div className="d-flex" style={{ alignItems: 'flex-start', gap: '0.5rem' }}>
