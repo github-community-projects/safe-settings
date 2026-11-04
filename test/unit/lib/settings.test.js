@@ -1045,6 +1045,20 @@ repository:
         expect(bar).toContain('labels')
       })
 
+      it('creates the code_scanning plugin and lets a repo override the org default_setup', () => {
+        const settings = createSettings({
+          code_scanning: { default_setup: { state: 'configured', query_suite: 'extended' } }
+        })
+        settings.subOrgConfigs = {}
+        settings.repoConfigs = { 'foo.yml': { code_scanning: { default_setup: { state: 'not-configured' } } } }
+        const pluginConfig = (repo) => {
+          const entry = settings.childPluginsList({ repo }).find(([, , section]) => section === 'code_scanning')
+          return entry && entry[1]
+        }
+        expect(pluginConfig('foo').default_setup).toEqual({ state: 'not-configured', query_suite: 'extended' })
+        expect(pluginConfig('bar').default_setup).toEqual({ state: 'configured', query_suite: 'extended' })
+      })
+
       it('18. org target:children for variables: org-level variables still run per-repo (documented nuance)', () => {
         // target:children strips from suborg+repo only; merged repo plugin
         // config still inherits the org-level variables → plugin DOES run.

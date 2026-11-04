@@ -106,6 +106,9 @@
       "items": {
         "$ref": "#/$defs/VariablesSettings"
       }
+    },
+    "code_scanning": {
+      "$ref": "#/$defs/CodeScanningSettings"
     }
   },
   "$defs": {
@@ -394,6 +397,17 @@
         }
       }
     },
+    "CodeScanningSettings": {
+      "description": "Code scanning settings",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "default_setup": {
+          "description": "CodeQL default setup. Only the declared fields are compared and updated; with `state: not-configured`, only the state is applied.",
+          "$ref": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions-next/api.github.com/api.github.com.2026-03-10.json#/paths/~1repos~1{owner}~1{repo}~1code-scanning~1default-setup/patch/requestBody/content/application~1json/schema"
+        }
+      }
+    },
     "VariablesSettings": {
       "description": "An Actions variable entry",
       "type": "object",
@@ -515,7 +529,8 @@
               "custom_repository_roles",
               "variables",
               "archive",
-              "app_installations"
+              "app_installations",
+              "code_scanning"
             ]
           },
           {
@@ -542,7 +557,8 @@
                   "custom_repository_roles",
                   "variables",
                   "archive",
-                  "app_installations"
+                  "app_installations",
+                  "code_scanning"
                 ]
               },
               "target": {
