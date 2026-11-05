@@ -34,7 +34,7 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }} 
-      - uses: azure/aks-set-context@c7eb093e5a5d47caa333f64974d5fd1cd4bf069d
+      - uses: azure/aks-set-context@60623acbdcbbdcf799ad50a1adf8703874339f8b
         with:
           resource-group: ${{env.AZURE_RESOURCE_GROUP}}
           cluster-name: ${{env.AZURE_AKS_CLUSTER}}
