@@ -141,7 +141,14 @@ for (const failAt of [
   test(`phase 27 preserves flags and removes only a successfully created fixture after ${failAt} fails`, async t => {
     const state = await fixture(t, { failAt })
     const flags = { ...env }
-    await assert.rejects(state.run, /Controlled reporting failure/)
+    const commentFails = failAt.endsWith('/comments')
+    // handleResults() completes the check when commenting fails, so the phase's own
+    // comment-count assertion is what stops the run.
+    await assert.rejects(state.run, commentFails ? /expected comment page count/ : /Controlled reporting failure/)
+    if (commentFails) {
+      assert(state.checks.length > 0)
+      assert(state.checks.every(check => check.status === 'completed'))
+    }
     assert.deepEqual(env, flags)
     assert.equal(state.deleted(), failAt !== 'POST /orgs/test-org/repos')
     assert(!state.logs.includes('Phase 27 complete'))

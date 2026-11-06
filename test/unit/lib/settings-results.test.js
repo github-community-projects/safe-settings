@@ -628,3 +628,36 @@ describe('Settings result deduplication', () => {
     })
   })
 })
+
+describe('Settings PR comment failures', () => {
+  const repo = { owner: 'test', repo: 'test-repo' }
+
+  it('still completes the check run when the PR comment fails', async () => {
+    jest.replaceProperty(env, 'CREATE_PR_COMMENT', 'true')
+    const context = {
+      payload: {
+        installation: { id: 123 },
+        repository: { owner: { login: 'test' }, name: 'admin' },
+        check_run: { id: 42, check_suite: { pull_requests: [{ number: 1 }] } }
+      },
+      octokit: {
+        rest: {
+          checks: { update: jest.fn().mockResolvedValue({}) },
+          issues: { createComment: jest.fn().mockRejectedValue(Object.assign(new Error('Validation Failed'), { status: 422 })) }
+        }
+      },
+      log: { debug: jest.fn(), info: jest.fn(), error: jest.fn() }
+    }
+    const settings = new Settings(true, context, repo, {}, 'main')
+    settings.appendToResults([new NopCommand('Branches', repo, null, 'Branch protection changes')])
+
+    await settings.handleResults()
+
+    expect(context.octokit.rest.issues.createComment).toHaveBeenCalled()
+    expect(context.octokit.rest.checks.update).toHaveBeenCalledTimes(1)
+    const params = context.octokit.rest.checks.update.mock.calls[0][0]
+    expect(params).toMatchObject({ check_run_id: 42, status: 'completed' })
+    expect(params.output.text).toContain('Validation Failed')
+    expect(context.log.error).toHaveBeenCalledWith(expect.stringContaining('Validation Failed'))
+  })
+})
