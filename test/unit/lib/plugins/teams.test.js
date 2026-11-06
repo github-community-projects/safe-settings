@@ -338,6 +338,41 @@ describe('Teams', () => {
       expectTeamNotDeleted(securityManagerTeamName)
     })
 
+    it('leaves teams holding the "All-repository read" organization role untouched', async () => {
+      const allRepoReadRoleId = any.integer()
+      const allRepoReadTeamName = 'all-repo-readers'
+      github.rest.repos.listTeams.mockResolvedValue({
+        data: [
+          { id: any.integer(), slug: allRepoReadTeamName, name: 'All Repo Readers', permission: 'pull' },
+          { id: removedTeamId, slug: removedTeamName, permission: 'push' }
+        ]
+      })
+      const plugin = configure([])
+
+      when(github.paginate)
+        .calledWith(organizationRolesRoute, { org })
+        .mockResolvedValue({
+          roles: [
+            { id: securityManagerRoleId, name: 'Security Manager' },
+            { id: allRepoReadRoleId, name: 'All-repository read' },
+            { id: any.integer(), name: 'CI/CD admin' }
+          ]
+        })
+
+      when(github.paginate)
+        .calledWith(organizationRoleTeamsRoute, { org, role_id: securityManagerRoleId })
+        .mockResolvedValue({ teams: [] })
+
+      when(github.paginate)
+        .calledWith(organizationRoleTeamsRoute, { org, role_id: allRepoReadRoleId })
+        .mockResolvedValue({ teams: [{ slug: allRepoReadTeamName, name: 'All Repo Readers' }] })
+
+      await plugin.sync()
+
+      expectTeamDeleted(removedTeamName)
+      expectTeamNotDeleted(allRepoReadTeamName)
+    })
+
     it('does not add or update a security manager team even when it is listed in the config', async () => {
       const plugin = configure([
         { name: securityManagerTeamName, permission: 'pull' },
