@@ -97,7 +97,7 @@ function resolveOptions () {
 async function getInstallationClient (probot, owner) {
   const app = await probot.auth()
   const installations = await app.paginate(
-    app.apps.listInstallations.endpoint.merge({ per_page: 100 })
+    app.rest.apps.listInstallations.endpoint.merge({ per_page: 100 })
   )
   if (installations.length === 0) {
     throw new Error('No installations found for this GitHub App')
@@ -129,7 +129,7 @@ function writeOutput (outputDir, filePath, content, overwrite) {
 
 async function main () {
   const opts = resolveOptions()
-  const probot = createProbot()
+  const probot = await createProbot().ready()
   probot.log.info(`Generating settings: source-type=${opts.sourceType} source-value=${opts.sourceValue}`)
 
   const { github, owner } = await getInstallationClient(probot, opts.owner)
