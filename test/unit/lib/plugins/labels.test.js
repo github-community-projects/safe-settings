@@ -148,5 +148,110 @@ describe('Labels', () => {
         expect(github.rest.issues.createLabel).toHaveBeenCalledTimes(1)
       })
     })
+
+    describe('dry-run with excluded labels', () => {
+      const config = {
+        exclude: [{ name: '.*' }],
+        include: [
+          { name: 'managed', color: 'FFFFFF', description: '' },
+          { name: 'renamed', oldname: 'old-name', color: '000000', description: '' },
+          { name: 'added', color: '0000FF', description: '' }
+        ]
+      }
+
+      beforeEach(() => {
+        github.paginate.mockReturnValueOnce(Promise.resolve([
+          { name: 'keep-me', color: '000000', description: '' },
+          { name: 'managed', color: 'FF0000', description: '' },
+          { name: 'old-name', color: '000000', description: '' }
+        ]))
+        github.rest.issues.createLabel.endpoint = jest.fn().mockReturnValue({})
+        github.rest.issues.updateLabel.endpoint = jest.fn().mockReturnValue({})
+      })
+
+      it('does not report excluded labels as deletions', () => {
+        const plugin = new Labels(true, github, { owner: 'bkeepers', repo: 'test' }, config, log, [])
+
+        return plugin.sync().then(results => {
+          expect(JSON.stringify(results)).not.toContain('keep-me')
+        })
+      })
+
+      it('still updates and renames excluded labels that the config manages', () => {
+        const plugin = new Labels(true, github, { owner: 'bkeepers', repo: 'test' }, config, log, [])
+
+        return plugin.sync().then(() => {
+          const updatedNames = github.rest.issues.updateLabel.endpoint.mock.calls.map(([params]) => params.current_name)
+          const createdNames = github.rest.issues.createLabel.endpoint.mock.calls.map(([params]) => params.name)
+          expect(updatedNames.sort()).toEqual(['managed', 'old-name'])
+          expect(createdNames).toEqual(['added'])
+        })
+      })
+    })
+
+    it('pads colors that YAML read as numbers', () => {
+      github.paginate.mockReturnValueOnce(Promise.resolve([]))
+
+      const plugin = configure([
+        { name: 'black', color: 0, description: '' }, // YAML treats `color: 000000` as 0
+        { name: 'almost-black', color: 1, description: '' } // YAML treats `color: 000001` as 1
+      ])
+
+      return plugin.sync().then(() => {
+        const createdColors = github.rest.issues.createLabel.mock.calls.map(([params]) => params.color)
+        expect(createdColors).toEqual(['000000', '000001'])
+      })
+    })
+
+    describe('invalid colors', () => {
+      // YAML treats `color: 5319e7` as 5319 × 10^7
+      const config = [{ name: 'hello-world', color: 5319e7, description: '' }]
+      const expectedMessage = "Label 'hello-world' has invalid color '53190000000'. Colors must be 6 hex characters, e.g. '5319e7'. Quote the value in YAML so it isn't read as a number."
+
+      it('reports an error instead of creating the label', () => {
+        github.paginate.mockReturnValueOnce(Promise.resolve([]))
+        log.error = jest.fn()
+        const errors = []
+        const plugin = new Labels(false, github, { owner: 'bkeepers', repo: 'test' }, config, log, errors)
+
+        return plugin.sync().then(() => {
+          expect(github.rest.issues.createLabel).not.toHaveBeenCalled()
+          expect(errors).toEqual([expect.objectContaining({ msg: expectedMessage, plugin: 'Labels' })])
+        })
+      })
+
+      it('reports an error instead of updating the label', () => {
+        github.paginate.mockReturnValueOnce(Promise.resolve([{ name: 'hello-world', color: '5319e7', description: '' }]))
+        log.error = jest.fn()
+        const errors = []
+        const plugin = new Labels(false, github, { owner: 'bkeepers', repo: 'test' }, config, log, errors)
+
+        return plugin.sync().then(() => {
+          expect(github.rest.issues.updateLabel).not.toHaveBeenCalled()
+          expect(errors).toEqual([expect.objectContaining({ msg: expectedMessage })])
+        })
+      })
+
+      it('shows the error in the dry-run', () => {
+        github.paginate.mockReturnValueOnce(Promise.resolve([]))
+        const plugin = new Labels(true, github, { owner: 'bkeepers', repo: 'test' }, config, log, [])
+
+        return plugin.sync().then(results => {
+          expect(results.flat()).toContainEqual(expect.objectContaining({ type: 'ERROR', action: expect.objectContaining({ msg: expectedMessage }) }))
+        })
+      })
+
+      it('reports a quoted non-hex color as written, without padding it', () => {
+        github.paginate.mockReturnValueOnce(Promise.resolve([]))
+        log.error = jest.fn()
+        const errors = []
+        const plugin = new Labels(false, github, { owner: 'bkeepers', repo: 'test' }, [{ name: 'hello-world', color: 'red', description: '' }], log, errors)
+
+        return plugin.sync().then(() => {
+          expect(github.rest.issues.createLabel).not.toHaveBeenCalled()
+          expect(errors).toEqual([expect.objectContaining({ msg: expect.stringContaining("invalid color 'red'. Colors must be 6 hex characters") })])
+        })
+      })
+    })
   })
 })
