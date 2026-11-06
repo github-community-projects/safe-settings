@@ -894,6 +894,16 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     return syncSettings(false, context)
   })
 
+  // A repo transferred into the org gets the same treatment as a newly created one.
+  // GitHub delivers repository.transferred to the receiving account, so this is the
+  // only webhook that fires when a repo arrives from another org or user.
+  robot.on('repository.transferred', async context => {
+    const { payload } = context
+    const { sender } = payload
+    robot.log.debug('repository.transferred payload from ', JSON.stringify(sender))
+    return syncSettings(false, context)
+  })
+
   robot.on('repository.archived', async context => {
     const { payload } = context
     const { sender } = payload
