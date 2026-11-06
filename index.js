@@ -293,7 +293,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     ]
 
     return changes.map((file) => ({
-      repo: file.match(/([^/]+)\.yml$/)[1],
+      repo: file.match(/([^/]+)\.ya?ml$/)[1],
       path: file
     }))
   }
@@ -316,7 +316,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     ]
 
     return changes.map((file) => ({
-      repo: file.match(/([^/]+)\.yml$/)[1],
+      repo: file.match(/([^/]+)\.ya?ml$/)[1],
       owner
     }))
   }
@@ -327,7 +327,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     const modifiedFiles = files.filter((s) => pattern.test(s))
 
     return modifiedFiles.map((modifiedFile) => ({
-      repo: modifiedFile.match(/([^/]+)\.yml$/)[1],
+      repo: modifiedFile.match(/([^/]+)\.ya?ml$/)[1],
       owner
     }))
   }
@@ -338,7 +338,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     const modifiedFiles = files.filter((s) => pattern.test(s))
 
     return modifiedFiles.map((modifiedFile) => ({
-      name: modifiedFile.match(/([^/]+)\.yml$/)[1],
+      name: modifiedFile.match(/([^/]+)\.ya?ml$/)[1],
       path: modifiedFile
     }))
   }

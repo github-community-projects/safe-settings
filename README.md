@@ -35,6 +35,8 @@
 > [!NOTE]
 > The `suborg` and `repo` level settings directory structure cannot be customized.
 
+Repository and suborg configuration files support both `.yml` and `.yaml` extensions, including push-triggered synchronization and pull request dry-run validation.
+
 ## 🚀 Quick Start
 
 ### 1. **Deploy Safe-Settings**
