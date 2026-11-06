@@ -32,7 +32,7 @@
   "author": "Yadhav Jayaraman",
   "license": "ISC",
   "dependencies": {
-    "@apidevtools/json-schema-ref-parser": "^14.2.1",
+    "@apidevtools/json-schema-ref-parser": "^15.3.5",
     "@probot/adapter-aws-lambda-serverless": "^4.0.3",
     "deepmerge": "^4.3.1",
     "eta": "^3.5.0",
