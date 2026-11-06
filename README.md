@@ -30,6 +30,8 @@
 
    1. `Repo` level settings. They reside in a repo specific yaml in `.github/repos` folder
 
+      Use the complete repository name in the filename, including any dots. For example, settings for `api.service` belong in `.github/repos/api.service.yml`.
+
 1. It is recommended to break the settings into `org`-level, `suborg`-level, and `repo`-level units. This will allow different teams to define and manage policies for their specific projects or business units. With `CODEOWNERS`, this will allow different people to be responsible for approving changes in different projects.
 
 > [!NOTE]
