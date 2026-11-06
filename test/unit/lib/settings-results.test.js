@@ -627,4 +627,135 @@ describe('Settings result deduplication', () => {
       expect(check.output.summary).toContain('`enforce_admins`')
     })
   })
+
+  describe('opt-in PR comment dedupe', () => {
+    const originalFlag = env.PR_COMMENT_DEDUPE_ENABLED
+    const botUserId = 12345
+    const heading = '#### :robot: Safe-Settings config changes detected:'
+    const botComment = (id, body = `${heading}\nold diff`, user = { type: 'Bot', id: botUserId }) =>
+      ({ id, node_id: `node-${id}`, user, body })
+    const nodeQueries = () => context.octokit.graphql.mock.calls.filter(([, variables]) => variables.ids)
+    const minimizedIds = () => context.octokit.graphql.mock.calls
+      .filter(([, variables]) => variables.id)
+      .map(([, variables]) => variables.id)
+    const change = (name, value = true) => ({
+      type: 'INFO',
+      plugin: 'Repository',
+      repo: name,
+      action: { additions: {}, deletions: {}, modifications: { description: value } }
+    })
+
+    beforeEach(() => {
+      env.PR_COMMENT_DEDUPE_ENABLED = 'true'
+      let nextCommentId = 999
+      context.octokit.rest.issues.createComment = jest.fn().mockImplementation(async () =>
+        ({ data: { id: nextCommentId++, user: { id: botUserId } } }))
+      context.octokit.rest.issues.listComments = jest.fn()
+      context.octokit.paginate = jest.fn().mockResolvedValue([])
+      context.octokit.graphql = jest.fn().mockResolvedValue({})
+      settings = new Settings(true, context, repo, {}, 'main')
+      settings.results = [change('test-repo')]
+    })
+
+    afterEach(() => {
+      if (originalFlag === undefined) delete env.PR_COMMENT_DEDUPE_ENABLED
+      else env.PR_COMMENT_DEDUPE_ENABLED = originalFlag
+    })
+
+    it.each([undefined, 'false', 'TRUE'])('does not list or minimize previous comments for flag=%s', async flag => {
+      env.PR_COMMENT_DEDUPE_ENABLED = flag
+      await settings.handleResults()
+      expect(context.octokit.paginate).not.toHaveBeenCalled()
+      expect(context.octokit.graphql).not.toHaveBeenCalled()
+      expect(context.octokit.rest.issues.createComment).toHaveBeenCalledTimes(1)
+    })
+
+    it('minimizes every stale comment from the same bot after creating the new one', async () => {
+      context.octokit.paginate.mockResolvedValue([
+        { id: 100, node_id: 'node-100', user: { type: 'User', id: 1 }, body: 'unrelated comment' },
+        botComment(1),
+        botComment(2)
+      ])
+      await settings.handleResults()
+      expect(nodeQueries().map(([, variables]) => variables.ids)).toEqual([['node-1', 'node-2']])
+      expect(minimizedIds()).toEqual(['node-1', 'node-2'])
+      const createOrder = context.octokit.rest.issues.createComment.mock.invocationCallOrder[0]
+      expect(createOrder).toBeLessThan(context.octokit.graphql.mock.invocationCallOrder[0])
+    })
+
+    it('minimizes stale paged comments from earlier runs', async () => {
+      context.octokit.paginate.mockResolvedValue([
+        botComment(1, '#### :robot: Safe-Settings config changes detected (1/2):\nold page'),
+        botComment(2, '#### :robot: Safe-Settings config changes detected (2/2):\nold page')
+      ])
+      await settings.handleResults()
+      expect(minimizedIds()).toEqual(['node-1', 'node-2'])
+    })
+
+    it('does not minimize any page of its own multi-page run', async () => {
+      settings.results = Array.from({ length: 400 }, (_, i) => change(`repo-${i}`, 'x'.repeat(200)))
+      context.octokit.paginate.mockImplementation(async () => [
+        botComment(1),
+        ...context.octokit.rest.issues.createComment.mock.calls.map(([params], index) =>
+          ({ ...botComment(999 + index), body: params.body }))
+      ])
+      await settings.handleResults()
+      expect(context.octokit.rest.issues.createComment.mock.calls.length).toBeGreaterThan(1)
+      expect(minimizedIds()).toEqual(['node-1'])
+    })
+
+    it('skips comments that are already minimized', async () => {
+      context.octokit.paginate.mockResolvedValue([botComment(1), botComment(2)])
+      context.octokit.graphql.mockResolvedValueOnce({
+        nodes: [{ id: 'node-1', isMinimized: true }, { id: 'node-2', isMinimized: false }]
+      })
+      await settings.handleResults()
+      expect(minimizedIds()).toEqual(['node-2'])
+    })
+
+    it('batches the isMinimized lookup into groups of 100 node IDs', async () => {
+      context.octokit.paginate.mockResolvedValue(Array.from({ length: 150 }, (_, i) => botComment(i + 1)))
+      await settings.handleResults()
+      expect(nodeQueries().map(([, variables]) => variables.ids.length)).toEqual([100, 50])
+    })
+
+    it.each([
+      ['a comment newer than its own, from an overlapping run', botComment(1000)],
+      ['a human comment quoting the heading', botComment(1, `Quoting the bot: "${heading}"`, { type: 'User', id: 1 })],
+      ['another bot comment quoting the heading', botComment(1, `Noticed: "${heading}"`, { type: 'Bot', id: 99999 })],
+      ['another bot comment starting with the same heading', botComment(1, heading, { type: 'Bot', id: 99999 })],
+      ['a matching comment without a node_id', { ...botComment(1), node_id: undefined }]
+    ])('does not minimize %s', async (_description, comment) => {
+      context.octokit.paginate.mockResolvedValue([comment])
+      await settings.handleResults()
+      expect(context.octokit.graphql).not.toHaveBeenCalled()
+    })
+
+    it('does not list comments when the new comment has no user identity', async () => {
+      context.octokit.rest.issues.createComment.mockResolvedValue({ data: { id: 999 } })
+      await settings.handleResults()
+      expect(context.octokit.paginate).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      ['listing previous comments', () => context.octokit.paginate.mockRejectedValue(new Error('rate limited'))],
+      ['minimizing a previous comment', () => {
+        context.octokit.paginate.mockResolvedValue([botComment(1)])
+        context.octokit.graphql.mockResolvedValueOnce({ nodes: [] }).mockRejectedValueOnce(new Error('boom'))
+      }]
+    ])('still completes the check run when %s fails', async (_description, arrange) => {
+      arrange()
+      await settings.handleResults()
+      expect(context.octokit.rest.issues.createComment).toHaveBeenCalledTimes(1)
+      expect(context.octokit.rest.checks.update).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not minimize anything when creating the new comment fails', async () => {
+      context.octokit.paginate.mockResolvedValue([botComment(1)])
+      context.octokit.rest.issues.createComment.mockRejectedValue(new Error('boom'))
+      await expect(settings.handleResults()).rejects.toThrow('boom')
+      expect(context.octokit.paginate).not.toHaveBeenCalled()
+      expect(context.octokit.graphql).not.toHaveBeenCalled()
+    })
+  })
 })
