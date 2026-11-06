@@ -1601,6 +1601,141 @@ entries:
     expect(merged.deletions.rules[0].parameters.allowed_merge_methods).toBeUndefined()
   })
 
+  it('Ruleset Compare ignores omitted parameters that hold the GitHub default', () => {
+    // GitHub fills these in when a ruleset is written without them, so a config
+    // that never declared them must not churn.
+    const target = {
+      id: 16107364,
+      name: 'default-branch-protection',
+      target: 'branch',
+      enforcement: 'active',
+      bypass_actors: [],
+      conditions: { ref_name: { exclude: [], include: ['~DEFAULT_BRANCH'] } },
+      rules: [
+        {
+          type: 'pull_request',
+          parameters: {
+            required_approving_review_count: 1,
+            dismiss_stale_reviews_on_push: true,
+            require_code_owner_review: true,
+            require_last_push_approval: true,
+            required_review_thread_resolution: false,
+            allowed_merge_methods: ['merge', 'squash', 'rebase'],
+            required_reviewers: [],
+            require_extra_approval_for_unattributed_changes: true,
+            dismissal_restriction: { allowed_actors: [], enabled: false }
+          }
+        },
+        {
+          type: 'required_status_checks',
+          parameters: {
+            strict_required_status_checks_policy: true,
+            do_not_enforce_on_create: false,
+            required_status_checks: [{ context: 'build' }]
+          }
+        }
+      ]
+    }
+    const source = {
+      name: 'default-branch-protection',
+      target: 'branch',
+      enforcement: 'active',
+      bypass_actors: [],
+      conditions: { ref_name: { exclude: [], include: ['~DEFAULT_BRANCH'] } },
+      rules: [
+        {
+          type: 'pull_request',
+          parameters: {
+            required_approving_review_count: 1,
+            dismiss_stale_reviews_on_push: true,
+            require_code_owner_review: true,
+            require_last_push_approval: true,
+            required_review_thread_resolution: false
+          }
+        },
+        {
+          type: 'required_status_checks',
+          parameters: {
+            strict_required_status_checks_policy: true,
+            required_status_checks: [{ context: 'build' }]
+          }
+        }
+      ]
+    }
+    const mockReturnGitHubContext = jest.fn().mockReturnValue({
+      request: () => {}
+    })
+    const mergeDeep = new MergeDeep(log, mockReturnGitHubContext, [])
+    const merged = mergeDeep.compareDeep(target, source)
+
+    expect(merged.hasChanges).toBeFalsy()
+    expect(merged.deletions.rules).toBeUndefined()
+  })
+
+  it('Ruleset Compare detects omitted parameters that differ from the GitHub default', () => {
+    const target = {
+      id: 16107364,
+      name: 'default-branch-protection',
+      target: 'branch',
+      enforcement: 'active',
+      bypass_actors: [],
+      conditions: { ref_name: { exclude: [], include: ['~DEFAULT_BRANCH'] } },
+      rules: [
+        {
+          type: 'pull_request',
+          parameters: {
+            required_approving_review_count: 1,
+            require_extra_approval_for_unattributed_changes: false,
+            dismissal_restriction: { enabled: true, allowed_actors: [{ id: 42, type: 'Team' }] }
+          }
+        },
+        {
+          type: 'required_status_checks',
+          parameters: {
+            strict_required_status_checks_policy: true,
+            do_not_enforce_on_create: true,
+            required_status_checks: [{ context: 'build' }]
+          }
+        }
+      ]
+    }
+    const source = {
+      name: 'default-branch-protection',
+      target: 'branch',
+      enforcement: 'active',
+      bypass_actors: [],
+      conditions: { ref_name: { exclude: [], include: ['~DEFAULT_BRANCH'] } },
+      rules: [
+        {
+          type: 'pull_request',
+          parameters: {
+            required_approving_review_count: 1
+          }
+        },
+        {
+          type: 'required_status_checks',
+          parameters: {
+            strict_required_status_checks_policy: true,
+            required_status_checks: [{ context: 'build' }]
+          }
+        }
+      ]
+    }
+    const mockReturnGitHubContext = jest.fn().mockReturnValue({
+      request: () => {}
+    })
+    const mergeDeep = new MergeDeep(log, mockReturnGitHubContext, [])
+    const merged = mergeDeep.compareDeep(target, source)
+
+    expect(merged.hasChanges).toBeTruthy()
+    const deletedParameters = merged.deletions.rules.map(rule => rule.parameters)
+    expect(deletedParameters).toContainEqual({
+      require_extra_approval_for_unattributed_changes: false,
+      dismissal_restriction: { enabled: true, allowed_actors: [{ id: 42, type: 'Team' }] }
+    })
+    expect(deletedParameters).toContainEqual({ do_not_enforce_on_create: true })
+  })
+
   it('Ruleset Compare reports no change when unnamed object array keys are reordered', () => {
     // code_scanning_tools elements are keyed by `tool` (not a NAME_FIELD), so they
     // fall back to a stable identity. GitHub returns the object keys in a different
