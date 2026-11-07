@@ -2164,6 +2164,80 @@
           }
         }
       }
+    },
+    "code_scanning": {
+      "description": "Code scanning settings",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "default_setup": {
+          "description": "CodeQL default setup. Only the declared fields are compared and updated; with `state: not-configured`, only the state is applied.",
+          "type": "object",
+          "properties": {
+            "state": {
+              "description": "The desired state of code scanning default setup.",
+              "type": "string",
+              "enum": [
+                "configured",
+                "not-configured"
+              ]
+            },
+            "runner_type": {
+              "description": "Runner type to be used.",
+              "type": "string",
+              "enum": [
+                "standard",
+                "labeled"
+              ]
+            },
+            "runner_label": {
+              "description": "Runner label to be used if the runner type is labeled.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "examples": [
+                "code-scanning"
+              ]
+            },
+            "query_suite": {
+              "description": "CodeQL query suite to be used.",
+              "type": "string",
+              "enum": [
+                "default",
+                "extended"
+              ]
+            },
+            "threat_model": {
+              "description": "Threat model to be used for code scanning analysis. Use `remote` to analyze only network sources and `remote_and_local` to include local sources like filesystem access, command-line arguments, database reads, environment variable and standard input.",
+              "type": "string",
+              "enum": [
+                "remote",
+                "remote_and_local"
+              ]
+            },
+            "languages": {
+              "description": "CodeQL languages to be analyzed.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "actions",
+                  "c-cpp",
+                  "csharp",
+                  "go",
+                  "java-kotlin",
+                  "javascript-typescript",
+                  "python",
+                  "ruby",
+                  "swift"
+                ]
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      }
     }
   },
   "$defs": {
@@ -4175,6 +4249,80 @@
         }
       }
     },
+    "CodeScanningSettings": {
+      "description": "Code scanning settings",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "default_setup": {
+          "description": "CodeQL default setup. Only the declared fields are compared and updated; with `state: not-configured`, only the state is applied.",
+          "type": "object",
+          "properties": {
+            "state": {
+              "description": "The desired state of code scanning default setup.",
+              "type": "string",
+              "enum": [
+                "configured",
+                "not-configured"
+              ]
+            },
+            "runner_type": {
+              "description": "Runner type to be used.",
+              "type": "string",
+              "enum": [
+                "standard",
+                "labeled"
+              ]
+            },
+            "runner_label": {
+              "description": "Runner label to be used if the runner type is labeled.",
+              "type": [
+                "string",
+                "null"
+              ],
+              "examples": [
+                "code-scanning"
+              ]
+            },
+            "query_suite": {
+              "description": "CodeQL query suite to be used.",
+              "type": "string",
+              "enum": [
+                "default",
+                "extended"
+              ]
+            },
+            "threat_model": {
+              "description": "Threat model to be used for code scanning analysis. Use `remote` to analyze only network sources and `remote_and_local` to include local sources like filesystem access, command-line arguments, database reads, environment variable and standard input.",
+              "type": "string",
+              "enum": [
+                "remote",
+                "remote_and_local"
+              ]
+            },
+            "languages": {
+              "description": "CodeQL languages to be analyzed.",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "actions",
+                  "c-cpp",
+                  "csharp",
+                  "go",
+                  "java-kotlin",
+                  "javascript-typescript",
+                  "python",
+                  "ruby",
+                  "swift"
+                ]
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
     "VariablesSettings": {
       "description": "An Actions variable entry",
       "type": "object",
@@ -4303,7 +4451,8 @@
               "custom_repository_roles",
               "variables",
               "archive",
-              "app_installations"
+              "app_installations",
+              "code_scanning"
             ]
           },
           {
@@ -4330,7 +4479,8 @@
                   "custom_repository_roles",
                   "variables",
                   "archive",
-                  "app_installations"
+                  "app_installations",
+                  "code_scanning"
                 ]
               },
               "target": {

@@ -1,6 +1,7 @@
 const Settings = require('../../../lib/settings')
 const Branches = require('../../../lib/plugins/branches')
 const Rulesets = require('../../../lib/plugins/rulesets')
+const CodeScanning = require('../../../lib/plugins/code_scanning')
 const NopCommand = require('../../../lib/nopcommand')
 const env = require('../../../lib/env')
 
@@ -493,6 +494,28 @@ describe('Settings result deduplication', () => {
         if (kind !== 'change') {
           expect(body).toContain('**failed-repo**:\n* fixture failure')
         }
+      }
+    })
+
+    it('renders code_scanning before and after values for modified and cleared fields', async () => {
+      const updateDefaultSetup = jest.fn()
+      updateDefaultSetup.endpoint = params => ({ url: 'https://api.github.com/repos/test/test-repo/code-scanning/default-setup', body: params })
+      const github = {
+        rest: {
+          codeScanning: {
+            getDefaultSetup: jest.fn().mockResolvedValue({ data: { state: 'configured', query_suite: 'default', languages: ['csharp', 'actions'] } }),
+            updateDefaultSetup
+          }
+        }
+      }
+      const plugin = new CodeScanning(true, github, repo, { default_setup: { state: 'configured', query_suite: 'extended', languages: [] } }, settings.log, [])
+      settings.results = await plugin.sync()
+
+      await settings.handleResults()
+
+      const { check, comments } = outputs()
+      for (const body of [check.output.summary, ...comments]) {
+        expect(body).toContain('**test-repo**\n- `code_scanning`\n  - - `languages`: `csharp, actions`\n  - ~ `query_suite`\n    - before: `default`\n    - after: `extended`\n\n</details>')
       }
     })
 
