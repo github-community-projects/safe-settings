@@ -24,6 +24,11 @@ repository:
     enableVulnerabilityAlerts: true
     enableAutomatedSecurityFixes: true
 
+  # Settings for release immutability
+  # See https://docs.github.com/en/rest/repos/repos#enable-immutable-releases
+  releases:
+    immutable: true
+
   # Either `true` to make the repository private, or `false` to make it public.
   # If this value is changed and if org members cannot change the visibility of repos
   # it would result in an error when updating a repo

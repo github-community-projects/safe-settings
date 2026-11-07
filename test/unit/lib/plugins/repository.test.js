@@ -7,7 +7,9 @@ describe('Repository', () => {
       repos: {
         get: jest.fn().mockResolvedValue({
           data: {
-            topics: []
+            topics: [],
+            owner: { login: 'bkeepers' },
+            name: 'test'
           }
         }),
         getBranch: jest.fn().mockResolvedValue({ data: { name: 'main', commit: { sha: 'abc123' } } }),
@@ -18,8 +20,10 @@ describe('Repository', () => {
       git: {
         createRef: jest.fn().mockResolvedValue()
       }
-    }
+    },
+    request: jest.fn().mockResolvedValue()
   }
+  github.request.endpoint = jest.fn().mockReturnValue({})
   const log = jest.fn()
   log.debug = jest.fn()
   log.error = jest.fn()
@@ -178,6 +182,45 @@ describe('Repository', () => {
           expect(errors).toHaveLength(1)
           expect(github.rest.repos.update).not.toHaveBeenCalled()
         })
+      })
+    })
+
+    it('enables release immutability', () => {
+      const plugin = configure({
+        releases: { immutable: true }
+      })
+
+      return plugin.sync().then(() => {
+        expect(github.request).toHaveBeenCalledWith(
+          'PUT /repos/{owner}/{repo}/releases/immutability',
+          { owner: 'bkeepers', repo: 'test' }
+        )
+      })
+    })
+
+    it('disables release immutability', () => {
+      const plugin = configure({
+        releases: { immutable: false }
+      })
+
+      return plugin.sync().then(() => {
+        expect(github.request).toHaveBeenCalledWith(
+          'DELETE /repos/{owner}/{repo}/releases/immutability',
+          { owner: 'bkeepers', repo: 'test' }
+        )
+      })
+    })
+
+    it('does not call release immutability API when releases setting is absent', () => {
+      const plugin = configure({
+        name: 'test'
+      })
+
+      return plugin.sync().then(() => {
+        expect(github.request).not.toHaveBeenCalledWith(
+          expect.stringMatching(/releases\/immutability/),
+          expect.anything()
+        )
       })
     })
   })
