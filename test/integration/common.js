@@ -220,6 +220,19 @@ function buildRepositoryCreatedEvent () {
   }
 }
 
+function buildRepositoryTransferredEvent () {
+  return {
+    name: 'repository.transferred',
+    payload: {
+      changes: { owner: { from: { organization: { login: any.word() } } } },
+      repository,
+      organization,
+      sender,
+      installation
+    }
+  }
+}
+
 function buildTriggerEvent () {
   return buildRepositoryCreatedEvent()
 }
@@ -235,5 +248,6 @@ module.exports = {
   buildTriggerEvent,
   buildRepositoryCreatedEvent,
   buildRepositoryEditedEvent,
+  buildRepositoryTransferredEvent,
   repository
 }

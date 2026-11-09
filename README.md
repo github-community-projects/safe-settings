@@ -162,6 +162,8 @@ The App listens to the following webhook events:
 
 - **repository.created**: If a repository is created in the org, the settings for the repo - the default settings for the org, overlaid with settings for the suborg that the repo belongs to, overlaid with the settings for that specific repo - is applied.
 
+- **repository.transferred**: If a repository is transferred into the org from another org or user account, the settings for the repo are applied the same way as for **repository.created**.
+
 - **branch_protection_rule**: If a branch protection rule is modified or deleted, `safe-settings` will `sync` the settings to prevent any unauthorized changes.
 
 - **repository.edited**: For e.g. If the default branch is renamed, or if topics change, `safe-settings` will `sync` the settings, to prevent any unauthorized changes.
