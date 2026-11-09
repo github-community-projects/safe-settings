@@ -781,6 +781,41 @@ describe('Environments Plugin test suite', () => {
     })
   })
 
+  describe('When additive is set and an existing environment is not in the config', () => {
+    beforeEach(() => {
+      when(github.request)
+        .calledWith('GET /repos/:org/:repo/environments', { org, repo })
+        .mockResolvedValue({
+          data: {
+            environments: [
+              fillEnvironment({ name: 'new_environment' }),
+              fillEnvironment({ name: 'old_environment' })
+            ]
+          }
+        })
+    })
+
+    it('does not delete the undeclared environment', async () => {
+      const plugin = new Environments(undefined, github, { owner: org, repo }, [{ name: 'new_environment' }], log, errors)
+      plugin.additive = true
+
+      await plugin.sync()
+
+      expect(github.request).not.toHaveBeenCalledWith('DELETE /repos/:org/:repo/environments/:environment_name', expect.anything())
+    })
+
+    it('reports the suppressed deletion in nop mode', async () => {
+      const plugin = new Environments(true, github, { owner: org, repo }, [{ name: 'new_environment' }], log, errors)
+      plugin.additive = true
+      const nopify = jest.spyOn(plugin, 'nopifyRequest')
+
+      const result = (await plugin.sync()).flat(Infinity)
+
+      expect(nopify).not.toHaveBeenCalledWith('DELETE /repos/:org/:repo/environments/:environment_name', expect.anything(), expect.anything())
+      expect(result.map(r => r.action.msg)).toContainEqual(expect.stringMatching(/1 deletion\(s\) suppressed/))
+    })
+  })
+
   // original 7 changes all combined together test
   describe('When there are changes across 7 environments', () => {
     it('detect and apply all changes', async () => {
