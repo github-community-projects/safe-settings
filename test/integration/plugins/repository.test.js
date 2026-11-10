@@ -21,12 +21,12 @@ describe('repository plugin', function () {
     const configFile = Buffer.from(fs.readFileSync(pathToConfig, 'utf8'))
     const config = yaml.load(configFile.toString())
     const encodedConfig = configFile.toString('base64')
-    mockAdminRepository(githubScope, encodedConfig, 2)
+    mockAdminRepository(githubScope, encodedConfig)
     githubScope
       .get(`/repos/${repository.owner.name}/${repository.name}`)
       .times(2)
       .reply(200, {
-        name: 'bar',
+        name: repository.name,
         delete_branch_on_merge: false,
         is_template: false,
         topics: []

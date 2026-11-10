@@ -1909,6 +1909,31 @@ repository:
       expect(result[0].repository_unselection.sort()).toEqual(['repo-a'])
     })
 
+    it('diffs a renamed repo config file against its old path', async () => {
+      AppOctokitClient.prototype.listOrgInstallations.mockResolvedValue([
+        { app_slug: 'kept-app', id: 42 },
+        { app_slug: 'dropped-app', id: 43 }
+      ])
+      settings.repoConfigs = { 'repo11-renamed.yml': { app_installations: [{ app_slug: 'kept-app' }] } }
+      settings.loadYamlFromRef = jest.fn(async filePath => {
+        if (filePath.endsWith('/repos/repo11.yml')) return { app_installations: [{ app_slug: 'kept-app' }, { app_slug: 'dropped-app' }] }
+        throw Object.assign(new Error('Not Found'), { status: 404 })
+      })
+
+      const result = await settings._buildAppChangesFromDelta(
+        settings.github,
+        'my-enterprise',
+        [],
+        [{ owner: 'test-org', repo: 'repo11-renamed', renamedFrom: 'repo11' }],
+        'prev-sha'
+      )
+
+      expect(result).toHaveLength(1)
+      expect(result[0].app_slug).toBe('dropped-app')
+      expect(result[0].repository_selection).toEqual([])
+      expect(result[0].repository_unselection).toEqual(['repo11-renamed'])
+    })
+
     it('skips apps configured at the org level (org entry implies all repos)', async () => {
       jest.spyOn(RepoSelector.prototype, 'resolve').mockResolvedValue(new Set(['repo-a']))
 
