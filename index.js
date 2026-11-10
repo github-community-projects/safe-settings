@@ -342,8 +342,22 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
       path: modifiedFile
     }))
   }
+  async function hasRunningValidatorCheckRun (context, headSha) {
+    const { data } = await context.octokit.rest.checks.listForRef({
+      ...context.repo(),
+      ref: headSha,
+      check_name: 'Safe-setting validator',
+      filter: 'all'
+    })
+    return data.check_runs.some(checkRun => checkRun.status !== 'completed')
+  }
+
   async function createCheckRun (context, pull_request, head_sha, head_branch) {
     const { payload } = context
+    if (await hasRunningValidatorCheckRun(context, head_sha)) {
+      robot.log.debug(`A Safe-setting validator check run is already running for ${head_sha}, returning...`)
+      return
+    }
     // robot.log.debug(`Check suite was requested! for ${context.repo()} ${pull_request.number} ${head_sha} ${head_branch}`)
     const res = await context.octokit.rest.checks.create({
       owner: payload.repository.owner.login,
