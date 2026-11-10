@@ -226,6 +226,8 @@ work when earlier changes have already configured team- or property-based suborg
 ### Use `safe-settings` to rename repos
 If you rename a `<repo.yml>` that corresponds to a repo, safe-settings will rename the repo to the new name. This behavior will take effect whether the env variable `BLOCK_REPO_RENAME_BY_HUMAN` is set or not.
 
+GitHub decides whether a removed file and an added file are a rename by comparing their contents. Two short repo files with almost the same content can be reported as a rename, and a renamed file with large edits can be reported as a removed file plus an added file. Rename the file without other large edits, and check the pull request dry run: a rename shows up as a `repository.name` change.
+
 ### Restricting `safe-settings` to specific repos
 
 To restrict which repositories `safe-settings` can manage, create a `deployment-settings.yml` file. This file controls the app's scope through the `restrictedRepos` configuration:

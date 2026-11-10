@@ -275,22 +275,49 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     return deploymentConfig
   }
 
-  function getAllChangedSubOrgConfigs (payload) {
-    const pattern = Settings.SUB_ORG_PATTERN
+  async function getPushedFiles (context, payload) {
+    const skipPush = reason => {
+      robot.log.error(`Skipping push ${payload.before}...${payload.after}: ${reason}. The next sync applies its changes.`)
+      return null
+    }
+    if (!payload.before || /^0+$/.test(payload.before)) return skipPush('it has no previous commit to compare with')
+    try {
+      const { data } = await context.octokit.rest.repos.compareCommitsWithBasehead({
+        ...context.repo(),
+        basehead: `${payload.before}...${payload.after}`
+      })
+      if (!Array.isArray(data.files)) return skipPush('the compare response has no file list')
+      if (data.files.length >= 300) return skipPush('it changes 300 or more files, more than the compare API lists')
+      return data.files
+    } catch (error) {
+      return skipPush(`the compare request failed: ${error.message}`)
+    }
+  }
 
-    const getMatchingFiles = (commits, type) =>
-      commits.flatMap((c) => c[type].filter((file) => pattern.test(file)))
+  async function listPullRequestFiles (context, pullNumber) {
+    const files = []
+    for (let page = 1; ; page++) {
+      const { data } = await context.octokit.rest.pulls.listFiles({ ...context.repo(), pull_number: pullNumber, per_page: 100, page })
+      files.push(...data)
+      if (data.length < 100) return files
+    }
+  }
+
+  function isSettingsFileChanged (files) {
+    return files.some(file => file.filename === Settings.FILE_PATH && file.status !== 'removed')
+  }
+
+  function getAllChangedSubOrgConfigs (files) {
+    const pattern = Settings.SUB_ORG_PATTERN
 
     // Include 'removed' so deleting a suborg config file is detected as a
     // change. The downstream delta logic loads the current version from the
     // head ref (which fails for a deleted file, yielding an empty config) and
     // diffs it against the base ref, correctly detecting removed entries such
     // as app_installations.
-    const changes = [
-      ...getMatchingFiles(payload.commits, 'added'),
-      ...getMatchingFiles(payload.commits, 'modified'),
-      ...getMatchingFiles(payload.commits, 'removed')
-    ]
+    const changes = files
+      .flatMap(file => [file.filename, file.previous_filename])
+      .filter(file => file && pattern.test(file))
 
     return changes.map((file) => ({
       repo: file.match(/([^/]+)\.yml$/)[1],
@@ -298,49 +325,21 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     }))
   }
 
-  function getAllChangedRepoConfigs (payload, owner) {
+  function getAllChangedRepoConfigs (files, owner) {
     const pattern = Settings.REPO_PATTERN
+    const configName = file => file.match(/([^/]+)\.yml$/)[1]
 
-    const getMatchingFiles = (commits, type) =>
-      commits.flatMap((c) => c[type].filter((file) => pattern.test(file)))
-
-    // Include 'removed' so deleting a repo config file is detected as a change.
-    // The downstream delta logic loads the current version from the head ref
-    // (which fails for a deleted file, yielding an empty config) and diffs it
-    // against the base ref, correctly detecting removed entries such as
-    // app_installations.
-    const changes = [
-      ...getMatchingFiles(payload.commits, 'added'),
-      ...getMatchingFiles(payload.commits, 'modified'),
-      ...getMatchingFiles(payload.commits, 'removed')
-    ]
-
-    return changes.map((file) => ({
-      repo: file.match(/([^/]+)\.yml$/)[1],
-      owner
-    }))
-  }
-
-  function getChangedRepoConfigName (files, owner) {
-    const pattern = Settings.REPO_PATTERN
-
-    const modifiedFiles = files.filter((s) => pattern.test(s))
-
-    return modifiedFiles.map((modifiedFile) => ({
-      repo: modifiedFile.match(/([^/]+)\.yml$/)[1],
-      owner
-    }))
-  }
-
-  function getChangedSubOrgConfigName (files) {
-    const pattern = Settings.SUB_ORG_PATTERN
-
-    const modifiedFiles = files.filter((s) => pattern.test(s))
-
-    return modifiedFiles.map((modifiedFile) => ({
-      name: modifiedFile.match(/([^/]+)\.yml$/)[1],
-      path: modifiedFile
-    }))
+    return files.flatMap(file => {
+      const previousIsRepoConfig = file.previous_filename && pattern.test(file.previous_filename)
+      if (!pattern.test(file.filename)) {
+        return previousIsRepoConfig ? [{ repo: configName(file.previous_filename), owner }] : []
+      }
+      const change = { repo: configName(file.filename), owner }
+      if (file.status === 'renamed' && previousIsRepoConfig) {
+        change.renamedFrom = configName(file.previous_filename)
+      }
+      return [change]
+    })
   }
   async function createCheckRun (context, pull_request, head_sha, head_branch) {
     const { payload } = context
@@ -497,19 +496,19 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
       return
     }
 
-    let repoChanges = getAllChangedRepoConfigs(payload, context.repo().owner)
+    const files = await getPushedFiles(context, payload)
+    if (!files) return
 
-    let subOrgChanges = getAllChangedSubOrgConfigs(payload)
+    let repoChanges = getAllChangedRepoConfigs(files, context.repo().owner)
+
+    let subOrgChanges = getAllChangedSubOrgConfigs(files)
     repoChanges = repoChanges.filter((r, i, arr) => arr.findIndex(item => item.repo === r.repo) === i)
 
     subOrgChanges = subOrgChanges.filter((s, i, arr) => arr.findIndex(item => item.repo === s.repo) === i)
     robot.log.debug(`deduped repos ${JSON.stringify(repoChanges)}`)
     robot.log.debug(`deduped subOrgs ${JSON.stringify(subOrgChanges)}`)
 
-    const settingsModified = payload.commits.find(commit => {
-      return commit.added.includes(Settings.FILE_PATH) ||
-        commit.modified.includes(Settings.FILE_PATH)
-    })
+    const settingsModified = isSettingsFileChanged(files)
     if (settingsModified) {
       robot.log.debug(`Changes in '${Settings.FILE_PATH}' detected, doing a full synch...`)
       return syncAllSettings(false, context, context.repo(), payload.after, null, {
@@ -850,14 +849,11 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     robot.log.debug(`Updating check run ${JSON.stringify(params)}`)
     await context.octokit.rest.checks.update(params)
 
-    params = Object.assign(context.repo(), { pull_number: pull_request.number })
+    const files = await listPullRequestFiles(context, pull_request.number)
 
-    const changes = await context.octokit.rest.pulls.listFiles(params)
-    const files = changes.data.map(f => { return f.filename })
-
-    const settingsModified = files.includes(Settings.FILE_PATH)
-    const repoChanges = getChangedRepoConfigName(files, context.repo().owner)
-    const subOrgChanges = getChangedSubOrgConfigName(files)
+    const settingsModified = isSettingsFileChanged(files)
+    const repoChanges = getAllChangedRepoConfigs(files, context.repo().owner)
+    const subOrgChanges = getAllChangedSubOrgConfigs(files)
 
     if (settingsModified) {
       robot.log.debug(`Changes in '${Settings.FILE_PATH}' detected, doing a full synch...`)

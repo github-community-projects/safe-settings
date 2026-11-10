@@ -20,12 +20,12 @@ describe('milestones plugin', function () {
     const pathToConfig = path.resolve(__dirname, '..', '..', 'fixtures', 'milestones-config.yml')
     const configFile = Buffer.from(fs.readFileSync(pathToConfig, 'utf8'))
     const encodedConfig = configFile.toString('base64')
-    mockAdminRepository(githubScope, encodedConfig, 2)
+    mockAdminRepository(githubScope, encodedConfig)
     githubScope
       .get(`/repos/${repository.owner.name}/${repository.name}`)
       .times(2)
       .reply(OK, {
-        name: 'bar',
+        name: repository.name,
         delete_branch_on_merge: false,
         is_template: false,
         topics: []
