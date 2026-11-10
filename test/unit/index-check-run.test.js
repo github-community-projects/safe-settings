@@ -30,7 +30,7 @@ describe('dry-run check runs for a pull request', () => {
     }
     const robot = {
       auth: jest.fn().mockResolvedValue(github),
-      log: { debug: jest.fn(), info: jest.fn(), error: jest.fn(), trace: jest.fn() },
+      log: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn(), trace: jest.fn() },
       on: (events, handler) => {
         for (const event of [].concat(events)) handlers.set(event, handler)
       }
@@ -48,6 +48,7 @@ describe('dry-run check runs for a pull request', () => {
     octokit: github
   })
   const openPullRequest = () => deliver('pull_request.opened', { pull_request: pullRequest })
+  const ownRun = status => ({ status, app: { slug: 'safe-settings' } })
   const requestCheckSuite = () => deliver('check_suite.requested', {
     check_suite: { head_branch: 'config-change', head_sha: headSha, pull_requests: [pullRequest] }
   })
@@ -59,19 +60,44 @@ describe('dry-run check runs for a pull request', () => {
     expect(github.rest.checks.create).toHaveBeenCalledWith(expect.objectContaining({ name: 'Safe-setting validator', head_sha: headSha }))
   })
 
-  it.each(['queued', 'in_progress'])('does not start a second dry run while one is %s for the same commit', async status => {
+  it.each(['in_progress', 'completed'])('does not start a second dry run when the PR opens after the push already started one (%s)', async status => {
     await requestCheckSuite()
-    checkRuns = [{ status }]
+    checkRuns = [ownRun(status)]
     await openPullRequest()
 
     expect(github.rest.checks.create).toHaveBeenCalledTimes(1)
   })
 
-  it('starts a new dry run when the earlier one on the same commit has finished', async () => {
-    checkRuns = [{ status: 'completed' }]
+  it('does not start a second dry run when the push event arrives after the PR opened', async () => {
+    await openPullRequest()
+    checkRuns = [ownRun('queued')]
+    await requestCheckSuite()
+
+    expect(github.rest.checks.create).toHaveBeenCalledTimes(1)
+  })
+
+  it('ignores a check run with the same name from another app', async () => {
+    checkRuns = [{ status: 'in_progress', app: { slug: 'safe-settings-canary' } }]
+
+    await openPullRequest()
+
+    expect(github.rest.checks.create).toHaveBeenCalledTimes(1)
+  })
+
+  it('still starts the dry run when the check runs cannot be listed', async () => {
+    github.rest.checks.listForRef.mockRejectedValue(Object.assign(new Error('Bad Gateway'), { status: 502 }))
+
+    await openPullRequest()
+
+    expect(github.rest.checks.create).toHaveBeenCalledTimes(1)
+  })
+
+  it('starts a new dry run on reopen even when an earlier run on the commit never finished', async () => {
+    checkRuns = [ownRun('queued')]
 
     await deliver('pull_request.reopened', { pull_request: pullRequest })
 
+    expect(github.rest.checks.listForRef).not.toHaveBeenCalled()
     expect(github.rest.checks.create).toHaveBeenCalledTimes(1)
   })
 })

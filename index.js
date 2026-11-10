@@ -342,22 +342,25 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
       path: modifiedFile
     }))
   }
-  async function hasRunningValidatorCheckRun (context, headSha) {
-    const { data } = await context.octokit.rest.checks.listForRef({
-      ...context.repo(),
-      ref: headSha,
-      check_name: 'Safe-setting validator',
-      filter: 'all'
-    })
-    return data.check_runs.some(checkRun => checkRun.status !== 'completed')
+  async function hasValidatorCheckRun (context, headSha) {
+    try {
+      const { data } = await context.octokit.rest.checks.listForRef({
+        ...context.repo(),
+        ref: headSha,
+        check_name: 'Safe-setting validator',
+        filter: 'all'
+      })
+      if (!data.check_runs.some(checkRun => checkRun.app?.slug === appSlug)) return false
+      robot.log.debug(`A Safe-setting validator check run already exists for ${headSha}, returning...`)
+      return true
+    } catch (error) {
+      robot.log.warn(`Could not list check runs for ${headSha}, starting the dry run anyway: ${error.message}`)
+      return false
+    }
   }
 
   async function createCheckRun (context, pull_request, head_sha, head_branch) {
     const { payload } = context
-    if (await hasRunningValidatorCheckRun(context, head_sha)) {
-      robot.log.debug(`A Safe-setting validator check run is already running for ${head_sha}, returning...`)
-      return
-    }
     // robot.log.debug(`Check suite was requested! for ${context.repo()} ${pull_request.number} ${head_sha} ${head_branch}`)
     const res = await context.octokit.rest.checks.create({
       owner: payload.repository.owner.login,
@@ -770,6 +773,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
       return
     }
     const pull_request = payload.check_suite.pull_requests[0]
+    if (await hasValidatorCheckRun(context, headSha)) return
     return createCheckRun(context, pull_request, headSha, headBranch)
   })
 
@@ -789,6 +793,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
       return
     }
     const pull_request = payload.pull_request
+    if (await hasValidatorCheckRun(context, pull_request.head.sha)) return
     return createCheckRun(context, pull_request, payload.pull_request.head.sha, payload.pull_request.head.ref)
   })
 
