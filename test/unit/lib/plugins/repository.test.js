@@ -24,6 +24,7 @@ describe('Repository', () => {
   log.debug = jest.fn()
   log.error = jest.fn()
   log.info = jest.fn()
+  log.warn = jest.fn()
 
   function configure (config) {
     const nop = false
@@ -51,6 +52,49 @@ describe('Repository', () => {
           mediaType: { previews: ['nebula-preview'] }
         })
         expect(log.info).toHaveBeenCalledWith(expect.stringContaining('Applying repository settings changes to bkeepers/test'))
+      })
+    })
+
+    describe('when the requested name redirects to a renamed repo', () => {
+      beforeEach(() => {
+        github.rest.repos.get.mockResolvedValueOnce({ data: { name: 'renamed', topics: [] } })
+      })
+
+      it('does not rename the repo back to the requested name', async () => {
+        const plugin = configure({ name: 'test', description: 'Hello World!' })
+
+        expect(await plugin.sync()).toEqual([])
+
+        expect(plugin.stale).toBe(true)
+        expect(github.rest.repos.update).not.toHaveBeenCalled()
+        expect(log.warn).toHaveBeenCalledWith('Skipping bkeepers/test: it was renamed to renamed')
+      })
+
+      it('reports the skip as a warning in a dry run', async () => {
+        github.rest.repos.update.endpoint = jest.fn().mockReturnValue({})
+        const plugin = new Repository(true, github, { owner: 'bkeepers', repo: 'test' }, { name: 'test' }, 1, log, [])
+
+        expect(await plugin.sync()).toEqual([expect.objectContaining({
+          type: 'WARNING',
+          repo: 'test',
+          action: expect.objectContaining({ msg: 'Skipping bkeepers/test: it was renamed to renamed' })
+        })])
+      })
+
+      it('renames the repo back when the config names the live repo as oldname', async () => {
+        const plugin = configure({ name: 'test', oldname: 'renamed' })
+
+        await plugin.sync()
+
+        expect(github.rest.repos.update).toHaveBeenCalledWith(expect.objectContaining({ repo: 'test', name: 'test' }))
+      })
+
+      it('syncs the repo when the config already asks for the live name', async () => {
+        const plugin = configure({ name: 'renamed', description: 'Hello World!' })
+
+        await plugin.sync()
+
+        expect(github.rest.repos.update).toHaveBeenCalledWith(expect.objectContaining({ repo: 'test', name: 'renamed', description: 'Hello World!' }))
       })
     })
 
