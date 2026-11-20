@@ -201,6 +201,24 @@ describe('Teams', () => {
       expect(await configure().find()).toEqual([record])
     })
 
+    it('ignores teams that get access from an organization role', async () => {
+      const orgRoleTeam = { id: 7, slug: 'all-repo-writers', name: 'All Repo Writers', permission: 'push', access_source: 'organization' }
+      const directTeam = { ...team, access_source: 'direct' }
+      github.paginate.mockResolvedValueOnce([directTeam, orgRoleTeam])
+      const plugin = configure([])
+      const result = (await plugin.sync()).flat(Infinity)
+      expect(result[0].action.deletions).toEqual([{ ...directTeam, name: directTeam.slug }])
+      expect(github.request.endpoint).not.toHaveBeenCalledWith(
+        'DELETE /orgs/:owner/teams/:team_slug/repos/:owner/:repo',
+        { ...repo, org: repo.owner, team_slug: orgRoleTeam.slug }
+      )
+      expect(github.request.endpoint).toHaveBeenCalledWith(
+        'DELETE /orgs/:owner/teams/:team_slug/repos/:owner/:repo',
+        { ...repo, org: repo.owner, team_slug: directTeam.slug }
+      )
+      expectNoWrites()
+    })
+
     it('filters security managers by their original display name before normalizing retained teams', async () => {
       const protectedTeam = { id: 99, name: 'Security Managers', slug: 'renamed-protected-team', permission: 'admin' }
       github.paginate
