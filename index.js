@@ -458,7 +458,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
           },
           octokit: github,
           log: robot.log,
-          repo: () => { return { repo: env.ADMIN_REPO, owner } }
+          repo: () => { return { repo: env.adminRepoFor(owner), owner } }
         }
         const result = await syncAllSettings(nop, context)
         if (!result) {
@@ -486,7 +486,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     const { payload } = context
     const { repository } = payload
 
-    const adminRepo = repository.name === env.ADMIN_REPO
+    const adminRepo = repository.name === env.adminRepoFor(repository.owner.login)
     if (!adminRepo) {
       return
     }
@@ -579,7 +579,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     if (payload.repository_ruleset.source_type === 'Organization') {
       // For org-level events, we need to update the context since context.repo() won't work
       const updatedContext = Object.assign({}, context, {
-        repo: () => { return { repo: env.ADMIN_REPO, owner: payload.organization.login } }
+        repo: () => { return { repo: env.adminRepoFor(payload.organization.login), owner: payload.organization.login } }
       })
       return syncAllSettings(false, updatedContext)
     } else {
@@ -642,7 +642,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
       try {
         const repofile = await context.octokit.request('GET /repos/{owner}/{repo}/contents/{path}', {
           owner: payload.repository.owner.login,
-          repo: env.ADMIN_REPO,
+          repo: env.adminRepoFor(payload.repository.owner.login),
           path: oldPath,
           headers: {
             'X-GitHub-Api-Version': '2026-03-10'
@@ -656,7 +656,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
           // Check if a config file already exists for the renamed repo name
           await context.octokit.request('GET /repos/{owner}/{repo}/contents/{path}', {
             owner: payload.repository.owner.login,
-            repo: env.ADMIN_REPO,
+            repo: env.adminRepoFor(payload.repository.owner.login),
             path: newPath,
             headers: {
               'X-GitHub-Api-Version': '2026-03-10'
@@ -667,7 +667,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
             // if the a config file does not exist, create one from the old one
             await context.octokit.request('PUT /repos/{owner}/{repo}/contents/{path}', {
               owner: payload.repository.owner.login,
-              repo: env.ADMIN_REPO,
+              repo: env.adminRepoFor(payload.repository.owner.login),
               path: newPath,
               name: `${payload.repository.name}.yml`,
               content,
@@ -726,7 +726,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
       return
     }
     const updatedContext = Object.assign({}, context, {
-      repo: () => { return { repo: env.ADMIN_REPO, owner: orgLogin } }
+      repo: () => { return { repo: env.adminRepoFor(orgLogin), owner: orgLogin } }
     })
     return syncAllSettings(false, updatedContext)
   })
@@ -734,7 +734,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
   robot.on('check_suite.requested', async context => {
     const { payload } = context
     const { repository } = payload
-    const adminRepo = repository.name === env.ADMIN_REPO
+    const adminRepo = repository.name === env.adminRepoFor(repository.owner.login)
     robot.log.debug(`Is Admin repo event ${adminRepo}`)
     if (!adminRepo) {
       robot.log.debug('Not working on the Admin repo, returning...')
@@ -763,7 +763,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     robot.log.debug('Pull_request opened !')
     const { payload } = context
     const { repository } = payload
-    const adminRepo = repository.name === env.ADMIN_REPO
+    const adminRepo = repository.name === env.adminRepoFor(repository.owner.login)
     robot.log.debug(`Is Admin repo event ${adminRepo}`)
     if (!adminRepo) {
       robot.log.debug('Not working on the Admin repo, returning...')
@@ -783,7 +783,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     const { payload } = context
     const { repository } = payload
     const pull_request = payload.pull_request
-    const adminRepo = repository.name === env.ADMIN_REPO
+    const adminRepo = repository.name === env.adminRepoFor(repository.owner.login)
 
     robot.log.debug(`Is Admin repo event ${adminRepo}`)
     if (!adminRepo) {
@@ -827,7 +827,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
       return
     }
 
-    const adminRepo = repository.name === env.ADMIN_REPO
+    const adminRepo = repository.name === env.adminRepoFor(repository.owner.login)
     robot.log.debug(`Is Admin repo event ${adminRepo}`)
     if (!adminRepo) {
       robot.log.debug('Not working on the Admin repo, returning...')
@@ -965,7 +965,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     if (overwrite) return filePath
     const { owner } = context.repo()
     try {
-      await context.octokit.rest.repos.getContent({ owner, repo: env.ADMIN_REPO, path: filePath })
+      await context.octokit.rest.repos.getContent({ owner, repo: env.adminRepoFor(owner), path: filePath })
       // File exists -> redirect to .sample
       return filePath.replace(/(\.ya?ml)$/i, '.sample$1')
     } catch (e) {
@@ -980,7 +980,7 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
   async function openSettingsPR (context, filePath, content, opts) {
     const github = context.octokit
     const { owner } = context.repo()
-    const repo = env.ADMIN_REPO
+    const repo = env.adminRepoFor(owner)
 
     const repoInfo = await github.rest.repos.get({ owner, repo })
     const baseBranch = repoInfo.data.default_branch

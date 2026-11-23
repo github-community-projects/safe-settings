@@ -15,7 +15,7 @@ describe('env', () => {
   beforeEach(() => {
     jest.resetModules()
     process.env = { ...originalEnv }
-    for (const key of [...Object.keys(defaults), 'DEPLOYMENT_CONFIG_FILE']) {
+    for (const key of [...Object.keys(defaults), 'DEPLOYMENT_CONFIG_FILE', 'ADMIN_REPO_OVERRIDES']) {
       delete process.env[key]
     }
   })
@@ -63,6 +63,53 @@ describe('env', () => {
     it('preserves an explicit false summary flag', () => {
       process.env.PR_COMMENT_SUMMARY_ENABLED = 'false'
       expect(require('../../../lib/env').PR_COMMENT_SUMMARY_ENABLED).toEqual('false')
+    })
+  })
+
+  describe('adminRepoFor', () => {
+    it('returns ADMIN_REPO for every account when no override is set', () => {
+      process.env.ADMIN_REPO = 'safe-settings-config'
+      const env = require('../../../lib/env')
+      expect(env.ADMIN_REPO_OVERRIDES).toEqual({})
+      expect(env.adminRepoFor('org-a')).toEqual('safe-settings-config')
+      expect(env.adminRepoFor(undefined)).toEqual('safe-settings-config')
+    })
+
+    it('returns the per-account override and falls back to ADMIN_REPO', () => {
+      process.env.ADMIN_REPO = 'safe-settings-config'
+      process.env.ADMIN_REPO_OVERRIDES = 'Org-B=safe-settings-config-b, org-c = config-c'
+      const env = require('../../../lib/env')
+      expect(env.adminRepoFor('org-b')).toEqual('safe-settings-config-b')
+      expect(env.adminRepoFor('ORG-B')).toEqual('safe-settings-config-b')
+      expect(env.adminRepoFor('org-c')).toEqual('config-c')
+      expect(env.adminRepoFor('org-a')).toEqual('safe-settings-config')
+    })
+
+    it('ignores malformed pairs', () => {
+      process.env.ADMIN_REPO_OVERRIDES = 'org-b=,=config,org-c,org-d=config-d,org-e=config-e=extra'
+      const env = require('../../../lib/env')
+      expect(env.ADMIN_REPO_OVERRIDES).toEqual({ 'org-d': 'config-d' })
+      expect(env.adminRepoFor('org-b')).toEqual('admin')
+      expect(env.adminRepoFor('org-c')).toEqual('admin')
+      expect(env.adminRepoFor('org-e')).toEqual('admin')
+    })
+
+    it.each(['constructor', 'toString', '__proto__', 'hasOwnProperty'])('falls back to ADMIN_REPO for the login %s', login => {
+      const env = require('../../../lib/env')
+      expect(env.adminRepoFor(login)).toEqual('admin')
+    })
+
+    it('still honors an explicit override for a login named like an Object property', () => {
+      process.env.ADMIN_REPO_OVERRIDES = 'constructor=config-c'
+      const env = require('../../../lib/env')
+      expect(env.adminRepoFor('constructor')).toEqual('config-c')
+      expect(env.adminRepoFor('toString')).toEqual('admin')
+    })
+
+    it('follows ADMIN_REPO when it is replaced at runtime', () => {
+      const env = require('../../../lib/env')
+      jest.replaceProperty(env, 'ADMIN_REPO', 'policy-repo')
+      expect(env.adminRepoFor('org-a')).toEqual('policy-repo')
     })
   })
 })
