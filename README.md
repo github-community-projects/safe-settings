@@ -929,6 +929,11 @@ You can pass environment variables; the easiest way to do it is via a `.env` fil
   ```
   ADMIN_REPO=safe-settings-config
   ```
+1. Use a different admin repository name for specific installation accounts using `ADMIN_REPO_OVERRIDES` (default is empty). The value is a comma-separated list of `account=repo` pairs; account logins are matched case-insensitively, and accounts that are not listed keep using `ADMIN_REPO`. This is useful when one app is installed on several organizations and their admin repositories cannot share a name. For e.g.
+  ```
+  ADMIN_REPO=safe-settings-config
+  ADMIN_REPO_OVERRIDES=my-other-org=safe-settings-config-other
+  ```
 1. Configure the config path using `CONFIG_PATH` (default is `.github`). For e.g.
   ```
   CONFIG_PATH=.github
@@ -963,7 +968,7 @@ You can pass environment variables; the easiest way to do it is via a `.env` fil
   ```
   A full sync (`CRON` or `npm run full-sync`) selects the installation whose
   account login matches `GH_ORG` case-insensitively and reads configuration from
-  that account's `<ADMIN_REPO>`. If no installation matches, including when the
+  that account's admin repository (`ADMIN_REPO`, or its `ADMIN_REPO_OVERRIDES` entry). If no installation matches, including when the
   app has no installations, the sync fails instead of syncing another account.
   This also applies to dry runs (`FULL_SYNC_NOP=true`); the CLI exits nonzero on
   a targeting error, and cron reports the execution as failed.
