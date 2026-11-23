@@ -86,11 +86,24 @@ describe('env', () => {
     })
 
     it('ignores malformed pairs', () => {
-      process.env.ADMIN_REPO_OVERRIDES = 'org-b=,=config,org-c,org-d=config-d'
+      process.env.ADMIN_REPO_OVERRIDES = 'org-b=,=config,org-c,org-d=config-d,org-e=config-e=extra'
       const env = require('../../../lib/env')
       expect(env.ADMIN_REPO_OVERRIDES).toEqual({ 'org-d': 'config-d' })
       expect(env.adminRepoFor('org-b')).toEqual('admin')
       expect(env.adminRepoFor('org-c')).toEqual('admin')
+      expect(env.adminRepoFor('org-e')).toEqual('admin')
+    })
+
+    it.each(['constructor', 'toString', '__proto__', 'hasOwnProperty'])('falls back to ADMIN_REPO for the login %s', login => {
+      const env = require('../../../lib/env')
+      expect(env.adminRepoFor(login)).toEqual('admin')
+    })
+
+    it('still honors an explicit override for a login named like an Object property', () => {
+      process.env.ADMIN_REPO_OVERRIDES = 'constructor=config-c'
+      const env = require('../../../lib/env')
+      expect(env.adminRepoFor('constructor')).toEqual('config-c')
+      expect(env.adminRepoFor('toString')).toEqual('admin')
     })
 
     it('follows ADMIN_REPO when it is replaced at runtime', () => {
