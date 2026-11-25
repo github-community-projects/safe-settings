@@ -338,6 +338,41 @@ describe('Teams', () => {
       expectTeamNotDeleted(securityManagerTeamName)
     })
 
+    it('leaves teams holding the "All-repository read" organization role untouched', async () => {
+      const allRepoReadRoleId = any.integer()
+      const allRepoReadTeamName = 'all-repo-readers'
+      github.rest.repos.listTeams.mockResolvedValue({
+        data: [
+          { id: any.integer(), slug: allRepoReadTeamName, name: 'All Repo Readers', permission: 'pull' },
+          { id: removedTeamId, slug: removedTeamName, permission: 'push' }
+        ]
+      })
+      const plugin = configure([])
+
+      when(github.paginate)
+        .calledWith(organizationRolesRoute, { org })
+        .mockResolvedValue({
+          roles: [
+            { id: securityManagerRoleId, name: 'Security Manager' },
+            { id: allRepoReadRoleId, name: 'All-repository read' },
+            { id: any.integer(), name: 'CI/CD admin' }
+          ]
+        })
+
+      when(github.paginate)
+        .calledWith(organizationRoleTeamsRoute, { org, role_id: securityManagerRoleId })
+        .mockResolvedValue({ teams: [] })
+
+      when(github.paginate)
+        .calledWith(organizationRoleTeamsRoute, { org, role_id: allRepoReadRoleId })
+        .mockResolvedValue({ teams: [{ slug: allRepoReadTeamName, name: 'All Repo Readers' }] })
+
+      await plugin.sync()
+
+      expectTeamDeleted(removedTeamName)
+      expectTeamNotDeleted(allRepoReadTeamName)
+    })
+
     it('does not add or update a security manager team even when it is listed in the config', async () => {
       const plugin = configure([
         { name: securityManagerTeamName, permission: 'pull' },
@@ -361,6 +396,36 @@ describe('Teams', () => {
         expect.objectContaining({ team_slug: securityManagerTeamName })
       )
       expectTeamNotDeleted(securityManagerTeamName)
+    })
+
+    it('keeps protections for discovered teams if a later organization role lookup fails', async () => {
+      const otherRoleId = securityManagerRoleId + 1
+      const plugin = configure([
+        { name: securityManagerTeamName, permission: 'pull' },
+        { name: updatedTeamName, permission: 'admin' }
+      ])
+
+      when(github.paginate)
+        .calledWith(organizationRolesRoute, { org })
+        .mockResolvedValue({
+          roles: [
+            { id: securityManagerRoleId, name: 'Security Manager' },
+            { id: otherRoleId, name: 'All-repository read' }
+          ]
+        })
+      when(github.paginate)
+        .calledWith(organizationRoleTeamsRoute, { org, role_id: securityManagerRoleId })
+        .mockResolvedValue({ teams: [{ slug: securityManagerTeamName, name: 'Security Managers' }] })
+      when(github.paginate)
+        .calledWith(organizationRoleTeamsRoute, { org, role_id: otherRoleId })
+        .mockRejectedValue({ status: 403 })
+
+      await plugin.sync()
+
+      const put = 'PUT /orgs/:owner/teams/:team_slug/repos/:owner/:repo'
+      expect(github.request).not.toHaveBeenCalledWith(put, expect.objectContaining({ team_slug: securityManagerTeamName }))
+      expect(github.request).toHaveBeenCalledWith(put, expect.objectContaining({ team_slug: updatedTeamName }))
+      expectNoTeamsDeleted()
     })
 
     it('emits an INFO nop command instead of managing a configured security manager team in nop mode', async () => {
