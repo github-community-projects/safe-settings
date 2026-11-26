@@ -644,6 +644,50 @@ describe('Environments Plugin test suite', () => {
     })
   })
 
+  describe('When deployment protection rules change', () => {
+    const RULES_ROUTE = 'GET /repos/:org/:repo/environments/:environment_name/deployment_protection_rules'
+    const POST_RULE = 'POST /repos/:org/:repo/environments/:environment_name/deployment_protection_rules'
+    const DELETE_RULE = 'DELETE /repos/:org/:repo/environments/:environment_name/deployment_protection_rules/:rule_id'
+
+    async function syncRules (existingAppIds, configAppIds) {
+      environmentName = 'deployment-protection-rules_environment'
+      when(github.request)
+        .calledWith('GET /repos/:org/:repo/environments', { org, repo })
+        .mockResolvedValue({ data: { environments: [fillEnvironment({ name: environmentName })] } })
+      when(github.request)
+        .calledWith(RULES_ROUTE, { org, repo, environment_name: environmentName })
+        .mockResolvedValue({
+          data: {
+            custom_deployment_protection_rules: existingAppIds.map(id => ({ id: 100 + id, app: { id } }))
+          }
+        })
+      const plugin = new Environments(undefined, github, { owner: org, repo }, [
+        { name: environmentName, deployment_protection_rules: configAppIds.map(id => ({ app_id: id })) }
+      ], log, errors)
+      await plugin.sync()
+      return github.request.mock.calls.filter(([route]) => route === POST_RULE || route === DELETE_RULE)
+    }
+
+    it('only adds the missing rule', async () => {
+      const calls = await syncRules([1], [1, 2])
+      expect(calls).toEqual([
+        [POST_RULE, { org, repo, environment_name: environmentName, integration_id: 2 }]
+      ])
+    })
+
+    it('only deletes the removed rule, by its own id', async () => {
+      const calls = await syncRules([1, 3], [1])
+      expect(calls).toEqual([
+        [DELETE_RULE, { org, repo, environment_name: environmentName, rule_id: 103 }]
+      ])
+    })
+
+    it('does nothing when the app ids are equal', async () => {
+      const calls = await syncRules([1, 2], [2, 1])
+      expect(calls).toEqual([])
+    })
+  })
+
   // wait-timer unchanged
   describe('When the existing wait-timer is 2 and the config is set to 2', () => {
     it('detect that the value is unchanged, and do nothing', async () => {
