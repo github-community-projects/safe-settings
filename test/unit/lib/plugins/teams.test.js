@@ -783,4 +783,38 @@ describe('Teams', () => {
       )
     })
   })
+
+  describe('nop mode with a delayed lookup', () => {
+    it('includes an addition whose team lookup resolves after a delay and makes no writes', async () => {
+      const repo = { owner: 'org', repo: 'test' }
+      const log = { debug: jest.fn(), info: jest.fn(), error: jest.fn() }
+      const errors = []
+      const gh = {
+        paginate: jest.fn(async route => {
+          if (route === gh.rest.repos.listTeams) return []
+          if (route === 'GET /orgs/{org}/organization-roles') return []
+          throw new Error(`Unexpected pagination route: ${route}`)
+        }),
+        rest: {
+          repos: { listTeams: jest.fn() },
+          teams: {
+            getByName: jest.fn(() => new Promise(resolve => setTimeout(() => resolve({ data: { id: 7, slug: 'late' } }), 50))),
+            create: jest.fn(),
+            addOrUpdateRepoPermissionsInOrg: Object.assign(jest.fn(), { endpoint: jest.fn().mockReturnValue({ url: 'endpoint', body: {} }) })
+          }
+        },
+        request: Object.assign(jest.fn(), { endpoint: jest.fn().mockReturnValue({ url: 'endpoint', body: {} }) })
+      }
+      const plugin = new Teams(true, gh, repo, [{ name: 'late', permission: 'push' }], log, errors)
+
+      const result = (await plugin.sync()).flat(Infinity)
+
+      expect(result).toHaveLength(2)
+      expect(result[1].action.msg).toBe('Add Teams to Repo')
+      expect(gh.rest.teams.addOrUpdateRepoPermissionsInOrg).not.toHaveBeenCalled()
+      expect(gh.rest.teams.create).not.toHaveBeenCalled()
+      expect(gh.request).not.toHaveBeenCalled()
+      expect(errors).toEqual([])
+    })
+  })
 })
