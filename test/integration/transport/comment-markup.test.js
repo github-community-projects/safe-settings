@@ -127,18 +127,29 @@ test('comments-disabled mode sends only a completed check', async () => {
   assert(output.summary.includes('`description`'))
 })
 
-for (const failure of ['comment', 'check']) {
-  test(`real transport propagates ${failure} failure instead of reporting success`, async () => {
-    const scope = nock(apiUrl).post('/repos/test-org/report-repo/issues/7/comments')
-    if (failure === 'comment') {
-      scope.reply(422, { message: 'Comment rejected' })
-    } else {
-      scope.reply(201, { id: 100 })
-        .patch('/repos/test-org/report-repo/check-runs/42').reply(422, { message: 'Check rejected' })
-    }
-    await assert.rejects((await reporter([change()])).handleResults(), error => error.status === 422)
-  })
-}
+test('real transport completes the check and reports the error when the comment fails', async () => {
+  let check
+  nock(apiUrl)
+    .post('/repos/test-org/report-repo/issues/7/comments').reply(422, { message: 'Comment rejected' })
+    .patch('/repos/test-org/report-repo/check-runs/42')
+    .reply((_uri, body) => { check = body; return [200, { id: 42, ...body }] })
+  const errors = []
+  const settings = await reporter([change()])
+  settings.log.error = message => errors.push(message)
+
+  await settings.handleResults()
+
+  assert.equal(check.status, 'completed')
+  assert.match(check.output.text, /Comment rejected/)
+  assert.equal(errors.length, 1)
+  assert.match(errors[0], /Failed to comment on the PR/)
+})
+
+test('real transport propagates check failure instead of reporting success', async () => {
+  nock(apiUrl).post('/repos/test-org/report-repo/issues/7/comments').reply(201, { id: 100 })
+    .patch('/repos/test-org/report-repo/check-runs/42').reply(422, { message: 'Check rejected' })
+  await assert.rejects((await reporter([change()])).handleResults(), error => error.status === 422)
+})
 
 function credentials (t) {
   const originalEnv = process.env
