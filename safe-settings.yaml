@@ -20,7 +20,7 @@ spec:
         app: safe-settings
     spec:
       containers:
-      - image: ghcr.io/github/safe-settings:2.1.10
+      - image: ghcr.io/github-community-projects/safe-settings:3.0.0
         name: safe-settings
         envFrom:
         - secretRef:

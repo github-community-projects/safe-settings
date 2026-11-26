@@ -901,7 +901,7 @@ A financial services company with 3,000+ repositories across 50 development team
 
 9. **Schedule regular sync**: Even with webhook-based enforcement, configure a CRON schedule as a safety net for missed webhooks.
 
-10. **Version pin your deployment**: Use specific image tags (e.g., `ghcr.io/github/safe-settings:2.1.13`) rather than floating tags to ensure reproducible deployments.
+10. **Version pin your deployment**: Use specific image tags (e.g., `ghcr.io/github-community-projects/safe-settings:3.0.0`) rather than floating tags to ensure reproducible deployments.
 
 ### Scaling
 

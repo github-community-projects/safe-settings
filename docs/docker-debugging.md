@@ -74,7 +74,7 @@ docker rm -f safe-settings-local
 Pull published image:
 
 ```bash
-docker pull ghcr.io/github/safe-settings:2.1.19
+docker pull ghcr.io/github-community-projects/safe-settings:3.0.0
 ```
 
 Run with the same env and port flags used for local testing:
@@ -85,7 +85,7 @@ docker run --name safe-settings-ghcr \
 	--env NODE_ENV=development \
 	--env HOST=0.0.0.0 \
 	-p 3000:3000 \
-	-it ghcr.io/github/safe-settings:2.1.19
+	-it ghcr.io/github-community-projects/safe-settings:3.0.0
 ```
 
 Inspect logs:
@@ -179,11 +179,11 @@ docker run --rm --name safe-settings-local \
 GHCR:
 
 ```bash
-docker pull ghcr.io/github/safe-settings:2.1.19 && \
+docker pull ghcr.io/github-community-projects/safe-settings:3.0.0 && \
 docker run --rm --name safe-settings-ghcr \
 	--env-file ./.env \
 	--env NODE_ENV=development \
 	--env HOST=0.0.0.0 \
 	-p 3000:3000 \
-	-it ghcr.io/github/safe-settings:2.1.19
+	-it ghcr.io/github-community-projects/safe-settings:3.0.0
 ```

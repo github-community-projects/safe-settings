@@ -218,7 +218,7 @@ aws lambda invoke \
 
 The template uses a **multi-stage Docker build**:
 
-1. **Stage 1**: Copies the official Safe Settings source from `ghcr.io/github/safe-settings:2.1.17`
+1. **Stage 1**: Copies the official Safe Settings source from `ghcr.io/github-community-projects/safe-settings:3.0.0`
 2. **Stage 2**: Creates Lambda runtime with Node.js 20, adds the Probot Lambda adapter, and includes the custom handler
 
 Both Lambda functions use the same Docker image but with different entry points:
@@ -273,7 +273,7 @@ Monitor deployments and test results in the Actions tab of your repository. Each
 2. **Environment variables**: Verify all required secrets are set in GitHub repository settings
 3. **Permissions**: Check IAM roles have ECR and Lambda access
 4. **Webhook URL**: Use the Lambda Function URL as your GitHub App webhook URL
-5. **Docker build failures**: Check that the base image `ghcr.io/github/safe-settings:2.1.17` is accessible
+5. **Docker build failures**: Check that the base image `ghcr.io/github-community-projects/safe-settings:3.0.0` is accessible
 
 ### Debug Mode
 
