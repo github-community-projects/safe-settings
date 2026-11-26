@@ -1440,3 +1440,65 @@ describe('nopifyRequest', () => {
     ]);
   });
 });
+
+describe('nop reporting', () => {
+  const org = 'bkeepers'
+  const repo = 'test'
+  const log = { debug: jest.fn(), info: jest.fn(), error: jest.fn() }
+  let github
+
+  const apiEnv = name => ({ name, protection_rules: [], deployment_branch_policy: null })
+  const newPlugin = (nop, entries) => new Environments(nop, github, { owner: org, repo }, entries, log, [])
+
+  beforeEach(() => {
+    github = {
+      request: jest.fn(() => Promise.resolve({})),
+      paginate: jest.fn().mockResolvedValue([])
+    }
+    when(github.request)
+      .calledWith('GET /repos/:org/:repo/environments', { org, repo })
+      .mockResolvedValue({ data: { environments: [apiEnv('old')] } })
+    when(github.request)
+      .calledWith('GET /repos/:org/:repo/environments/:environment_name/deployment_protection_rules', expect.anything())
+      .mockResolvedValue({ data: { custom_deployment_protection_rules: [] } })
+  })
+
+  const writes = () => github.request.mock.calls.filter(([route]) => !route.startsWith('GET '))
+
+  it('sync() returns the planned add and remove without writing', async () => {
+    const res = await newPlugin(true, [{ name: 'new' }]).sync()
+
+    const commands = [res].flat(3).filter(x => x instanceof NopCommand)
+    expect(commands.map(c => c.action.msg).sort()).toEqual(['Delete environment', 'Update environment settings'])
+    expect(writes()).toEqual([])
+  })
+
+  it('add() returns its NopCommands in nop mode', async () => {
+    const res = await newPlugin(true, []).add({ name: 'new', variables: [{ name: 'a', value: '1' }] })
+
+    expect(res.map(c => c.action.msg)).toEqual(['Update environment settings', 'Create environment variable'])
+    expect(res.every(c => c instanceof NopCommand)).toBe(true)
+  })
+
+  it('update() returns its NopCommands in nop mode', async () => {
+    const existing = { name: 'old', wait_timer: 0, prevent_self_review: false, reviewers: [], deployment_branch_policy: null, variables: [], deployment_protection_rules: [] }
+    const res = await newPlugin(true, []).update(existing, { ...existing, wait_timer: 5 })
+
+    expect(res.map(c => c.action.msg)).toEqual(['Update environment settings'])
+    expect(res[0]).toBeInstanceOf(NopCommand)
+  })
+
+  it('remove() returns its NopCommand in nop mode', async () => {
+    const res = await newPlugin(true, []).remove({ name: 'old' })
+
+    expect(res.map(c => c.action.msg)).toEqual(['Delete environment'])
+    expect(res[0]).toBeInstanceOf(NopCommand)
+  })
+
+  it('remove() returns nothing and writes in non-nop mode', async () => {
+    const res = await newPlugin(false, []).remove({ name: 'old' })
+
+    expect(res).toBeUndefined()
+    expect(writes()).toHaveLength(1)
+  })
+})
