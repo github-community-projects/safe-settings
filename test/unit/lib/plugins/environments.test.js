@@ -781,6 +781,93 @@ describe('Environments Plugin test suite', () => {
     })
   })
 
+  describe('When additive is set and an existing environment is not in the config', () => {
+    beforeEach(() => {
+      when(github.request)
+        .calledWith('GET /repos/:org/:repo/environments', { org, repo })
+        .mockResolvedValue({
+          data: {
+            environments: [
+              fillEnvironment({ name: 'new_environment' }),
+              fillEnvironment({ name: 'old_environment' })
+            ]
+          }
+        })
+    })
+
+    it('does not delete the undeclared environment', async () => {
+      const plugin = new Environments(undefined, github, { owner: org, repo }, [{ name: 'new_environment' }], log, errors)
+      plugin.additive = true
+
+      await plugin.sync()
+
+      expect(github.request).not.toHaveBeenCalledWith('DELETE /repos/:org/:repo/environments/:environment_name', expect.anything())
+    })
+
+    it('reports the suppressed deletion in nop mode', async () => {
+      const plugin = new Environments(true, github, { owner: org, repo }, [{ name: 'new_environment' }], log, errors)
+      plugin.additive = true
+      const nopify = jest.spyOn(plugin, 'nopifyRequest')
+
+      const result = (await plugin.sync()).flat(Infinity)
+
+      expect(nopify).not.toHaveBeenCalledWith('DELETE /repos/:org/:repo/environments/:environment_name', expect.anything(), expect.anything())
+      expect(result.map(r => r.action.msg)).toContainEqual(expect.stringMatching(/1 deletion\(s\) suppressed/))
+    })
+  })
+
+  describe('When an existing environment has variables and protection rules that are not in the config', () => {
+    const name = 'variables_environment'
+    const deleteVariable = 'DELETE /repos/:org/:repo/environments/:environment_name/variables/:variable_name'
+    const deleteRule = 'DELETE /repos/:org/:repo/environments/:environment_name/deployment_protection_rules/:rule_id'
+
+    beforeEach(() => {
+      when(github.request)
+        .calledWith('GET /repos/:org/:repo/environments', { org, repo })
+        .mockResolvedValue({ data: { environments: [fillEnvironment({ name })] } })
+      when(github.request)
+        .calledWith('GET /repos/:org/:repo/environments/:environment_name/deployment_protection_rules', { org, repo, environment_name: name })
+        .mockResolvedValue({ data: { custom_deployment_protection_rules: [{ id: 10, app: { id: 1 } }] } })
+      github.paginate.mockResolvedValue([{ name: 'keep', value: 'a' }, { name: 'stale', value: 'b' }])
+    })
+
+    const config = [{
+      name,
+      variables: [{ name: 'keep', value: 'a' }, { name: 'added', value: 'c' }],
+      deployment_protection_rules: [{ app_id: 2 }]
+    }]
+
+    it('deletes them when additive is not set', async () => {
+      const plugin = new Environments(undefined, github, { owner: org, repo }, config, log, errors)
+
+      await plugin.sync()
+
+      expect(github.request).toHaveBeenCalledWith(deleteVariable, expect.objectContaining({ variable_name: 'stale' }))
+      expect(github.request).toHaveBeenCalledWith(deleteRule, expect.objectContaining({ rule_id: 10 }))
+    })
+
+    it('keeps them when additive is set and still adds the declared ones', async () => {
+      const plugin = new Environments(undefined, github, { owner: org, repo }, config, log, errors)
+      plugin.additive = true
+
+      await plugin.sync()
+
+      expect(github.request).not.toHaveBeenCalledWith(deleteVariable, expect.anything())
+      expect(github.request).not.toHaveBeenCalledWith(deleteRule, expect.anything())
+      expect(github.request).toHaveBeenCalledWith('POST /repos/:org/:repo/environments/:environment_name/variables', expect.objectContaining({ name: 'added', value: 'c' }))
+      expect(github.request).toHaveBeenCalledWith('POST /repos/:org/:repo/environments/:environment_name/deployment_protection_rules', expect.objectContaining({ integration_id: 2 }))
+    })
+
+    it('reports the suppressed variable and rule deletions in nop mode', async () => {
+      const plugin = new Environments(true, github, { owner: org, repo }, config, log, errors)
+      plugin.additive = true
+
+      const result = (await plugin.sync()).flat(Infinity)
+
+      expect(result.map(r => r.action.msg)).toContainEqual(expect.stringMatching(/2 deletion\(s\) suppressed/))
+    })
+  })
+
   // original 7 changes all combined together test
   describe('When there are changes across 7 environments', () => {
     it('detect and apply all changes', async () => {
