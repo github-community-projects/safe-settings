@@ -191,7 +191,12 @@
           "description": "Ignore any labels matching these regexes (don't delete them)",
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              }
+            }
           }
         }
       }
