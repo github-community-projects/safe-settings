@@ -68,4 +68,86 @@ describe('Collaborators', () => {
       })
     })
   })
+
+  describe('built-in roles', () => {
+    const flags = {
+      admin: { admin: true, maintain: true, push: true, triage: true, pull: true },
+      maintain: { admin: false, maintain: true, push: true, triage: true, pull: true },
+      push: { admin: false, maintain: false, push: true, triage: true, pull: true },
+      triage: { admin: false, maintain: false, push: false, triage: true, pull: true },
+      pull: { admin: false, maintain: false, push: false, triage: false, pull: true }
+    }
+
+    Object.keys(flags).forEach(role => {
+      it(`does not update a ${role} collaborator that already matches`, async () => {
+        const plugin = configure([{ username: 'alice', permission: role }])
+        github.rest.repos.listCollaborators.mockResolvedValueOnce({ data: [{ login: 'alice', permissions: flags[role] }] })
+        await plugin.sync()
+        expect(github.rest.repos.addCollaborator).not.toHaveBeenCalled()
+      })
+    })
+
+    it('updates a collaborator whose role differs', async () => {
+      const plugin = configure([{ username: 'alice', permission: 'maintain' }])
+      github.rest.repos.listCollaborators.mockResolvedValueOnce({ data: [{ login: 'alice', permissions: flags.push }] })
+      await plugin.sync()
+      expect(github.rest.repos.addCollaborator).toHaveBeenCalledWith({
+        owner: 'bkeepers',
+        repo: 'test',
+        username: 'alice',
+        permission: 'maintain'
+      })
+    })
+
+    it('does not leak extra fields into the update payload', async () => {
+      const plugin = configure([{ username: 'alice', permission: 'triage' }])
+      github.rest.repos.listCollaborators.mockResolvedValueOnce({ data: [{ login: 'alice', role_name: 'write', permissions: flags.push }] })
+      await plugin.sync()
+      expect(github.rest.repos.addCollaborator.mock.calls[0][0]).toEqual({
+        owner: 'bkeepers',
+        repo: 'test',
+        username: 'alice',
+        permission: 'triage'
+      })
+    })
+  })
+
+  describe('invitations', () => {
+    const invite = (login, permissions) => ({ id: 7, invitee: { login }, permissions })
+
+    const cases = [['admin', 'admin'], ['maintain', 'maintain'], ['write', 'push'], ['triage', 'triage'], ['read', 'pull']]
+    cases.forEach(([api, role]) => {
+      it(`does not update a pending ${api} invitation that already matches`, async () => {
+        const plugin = configure([{ username: 'alice', permission: role }])
+        github.rest.repos.listInvitations.mockResolvedValueOnce({ data: [invite('alice', api)] })
+        await plugin.sync()
+        expect(github.rest.repos.updateInvitation).not.toHaveBeenCalled()
+        expect(github.rest.repos.deleteInvitation).not.toHaveBeenCalled()
+      })
+    })
+
+    it('updates a pending invitation to maintain', async () => {
+      const plugin = configure([{ username: 'alice', permission: 'maintain' }])
+      github.rest.repos.listInvitations.mockResolvedValueOnce({ data: [invite('alice', 'read')] })
+      await plugin.sync()
+      expect(github.rest.repos.updateInvitation).toHaveBeenCalledWith({
+        invitation_id: 7,
+        permissions: 'maintain',
+        owner: 'bkeepers',
+        repo: 'test'
+      })
+    })
+
+    it('updates a pending invitation to triage', async () => {
+      const plugin = configure([{ username: 'alice', permission: 'triage' }])
+      github.rest.repos.listInvitations.mockResolvedValueOnce({ data: [invite('alice', 'write')] })
+      await plugin.sync()
+      expect(github.rest.repos.updateInvitation).toHaveBeenCalledWith({
+        invitation_id: 7,
+        permissions: 'triage',
+        owner: 'bkeepers',
+        repo: 'test'
+      })
+    })
+  })
 })
