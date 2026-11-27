@@ -783,4 +783,55 @@ describe('Teams', () => {
       )
     })
   })
+
+  describe('team lookup by configured name', () => {
+    const notFound = () => Object.assign(new Error('Not Found'), { status: 404 })
+
+    beforeEach(() => {
+      github.rest.repos.listTeams.mockResolvedValue({ data: [] })
+    })
+
+    it('finds a team whose slug contains underscores instead of creating it', async () => {
+      github.rest.teams.getByName.mockImplementation(async ({ team_slug: slug }) => {
+        if (slug === 'my_team') return { data: { id: 7, slug: 'my_team' } }
+        throw notFound()
+      })
+
+      await configure([{ name: 'my_team', permission: 'push' }]).sync()
+
+      expect(github.rest.teams.getByName).toHaveBeenCalledWith({ org, team_slug: 'my_team' })
+      expect(github.rest.teams.create).not.toHaveBeenCalled()
+      expect(github.rest.teams.addOrUpdateRepoPermissionsInOrg).toHaveBeenCalledWith(expect.objectContaining({ team_id: 7, team_slug: 'my_team', permission: 'push' }))
+    })
+
+    it('looks up a display name by its normalized slug', async () => {
+      when(github.rest.teams.getByName)
+        .calledWith({ org, team_slug: 'my-team' })
+        .mockResolvedValue({ data: { id: 8, slug: 'my-team' } })
+
+      await configure([{ name: 'My Team!', permission: 'pull' }]).sync()
+
+      expect(github.rest.teams.create).not.toHaveBeenCalled()
+      expect(github.rest.teams.addOrUpdateRepoPermissionsInOrg).toHaveBeenCalledWith(expect.objectContaining({ team_id: 8, team_slug: 'my-team' }))
+    })
+
+    it('creates the team only when it does not exist', async () => {
+      github.rest.teams.getByName.mockRejectedValue(notFound())
+      github.rest.teams.create.mockResolvedValue({ data: { id: 9, slug: 'new_team' } })
+
+      await configure([{ name: 'new_team', permission: 'push' }]).sync()
+
+      expect(github.rest.teams.getByName).toHaveBeenCalledWith({ org, team_slug: 'new_team' })
+      expect(github.rest.teams.create).toHaveBeenCalledWith({ org, name: 'new_team' })
+    })
+
+    it('does not create a team when the lookup fails for another reason', async () => {
+      github.rest.teams.getByName.mockRejectedValue(Object.assign(new Error('Forbidden'), { status: 403 }))
+
+      await configure([{ name: 'my_team', permission: 'push' }]).sync()
+
+      expect(github.rest.teams.create).not.toHaveBeenCalled()
+      expect(github.rest.teams.addOrUpdateRepoPermissionsInOrg).not.toHaveBeenCalled()
+    })
+  })
 })
