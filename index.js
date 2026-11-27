@@ -1074,9 +1074,11 @@ module.exports = (robot, { getRouter }, Settings = require('./lib/settings')) =>
     # * * * * * *
     */
     cron.schedule(process.env.CRON, async () => {
-      robot.log.debug('running a task every minute')
+      // FULL_SYNC_NOP applies to the scheduled sync as it does to `npm run full-sync`,
+      // so a server can run in a dry-run (shadow) mode. Unset or not 'true': unchanged.
+      robot.log.info(`Starting scheduled full sync with NOP=${env.FULL_SYNC_NOP}`)
       try {
-        return await syncInstallation()
+        return await syncInstallation(env.FULL_SYNC_NOP)
       } catch (e) {
         robot.log.error(`Scheduled full sync failed: ${e}`)
         throw e

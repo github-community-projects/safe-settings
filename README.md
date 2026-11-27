@@ -921,6 +921,7 @@ You can pass environment variables; the easiest way to do it is via a `.env` fil
   # * * * * * *
   CRON=* * * * * # Run every minute
   ```
+  Set `FULL_SYNC_NOP=true` to run the scheduled sync as a dry run, as with `npm run full-sync`.
 1. Logging level can be set using `LOG_LEVEL`. For e.g.
   ```
   LOG_LEVEL=trace
