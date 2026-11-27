@@ -150,4 +150,90 @@ describe('Collaborators', () => {
       })
     })
   })
+
+  describe('direct roles', () => {
+    const collaborator = login => ({ login, permissions: { admin: false, maintain: false, push: true, triage: true, pull: true } })
+    const source = (type, roleName) => ({ roleName, source: { __typename: type } })
+    const edge = (login, ...permissionSources) => ({ node: { login }, permissionSources })
+    const page = (edges, endCursor = null) => ({ repository: { collaborators: { pageInfo: { hasNextPage: !!endCursor, endCursor }, edges } } })
+
+    beforeEach(() => {
+      github.graphql = jest.fn()
+    })
+
+    it('does not update a custom role the collaborator already holds directly', async () => {
+      const plugin = configure([{ username: 'alice', permission: 'custom-role' }])
+      github.rest.repos.listCollaborators.mockResolvedValueOnce({ data: [collaborator('alice')] })
+      github.graphql.mockResolvedValueOnce(page([edge('alice', source('Organization', null), source('Repository', 'custom-role'), source('Team', 'custom-role'))]))
+      await plugin.sync()
+      expect(github.rest.repos.addCollaborator).not.toHaveBeenCalled()
+      expect(github.graphql).toHaveBeenCalledWith(expect.any(String), { owner: 'bkeepers', repo: 'test', cursor: null })
+    })
+
+    it('compares built-in roles by their config names', async () => {
+      const plugin = configure([
+        { username: 'writer', permission: 'push' },
+        { username: 'maintainer', permission: 'maintain' },
+        { username: 'reader', permission: 'push' }
+      ])
+      github.rest.repos.listCollaborators.mockResolvedValueOnce({ data: [collaborator('writer'), collaborator('maintainer'), collaborator('reader')] })
+      github.graphql.mockResolvedValueOnce(page([
+        edge('writer', source('Repository', 'write')),
+        edge('maintainer', source('Repository', 'maintain')),
+        edge('reader', source('Repository', 'read'))
+      ]))
+      await plugin.sync()
+      expect(github.rest.repos.addCollaborator).toHaveBeenCalledTimes(1)
+      expect(github.rest.repos.addCollaborator).toHaveBeenCalledWith({ owner: 'bkeepers', repo: 'test', username: 'reader', permission: 'push' })
+    })
+
+    it('updates a role that is only held through a team', async () => {
+      const plugin = configure([{ username: 'alice', permission: 'custom-role' }])
+      github.rest.repos.listCollaborators.mockResolvedValueOnce({ data: [collaborator('alice')] })
+      github.graphql.mockResolvedValueOnce(page([edge('alice', source('Repository', 'write'), source('Team', 'custom-role'))]))
+      await plugin.sync()
+      expect(github.rest.repos.addCollaborator).toHaveBeenCalledWith({ owner: 'bkeepers', repo: 'test', username: 'alice', permission: 'custom-role' })
+    })
+
+    it('reads all pages', async () => {
+      const plugin = configure([{ username: 'alice', permission: 'custom-role' }, { username: 'bob', permission: 'custom-role' }])
+      github.rest.repos.listCollaborators.mockResolvedValueOnce({ data: [collaborator('alice'), collaborator('bob')] })
+      github.graphql
+        .mockResolvedValueOnce(page([edge('alice', source('Repository', 'custom-role'))], 'next'))
+        .mockResolvedValueOnce(page([edge('bob', source('Repository', 'custom-role'))]))
+      await plugin.sync()
+      expect(github.graphql).toHaveBeenLastCalledWith(expect.any(String), { owner: 'bkeepers', repo: 'test', cursor: 'next' })
+      expect(github.rest.repos.addCollaborator).not.toHaveBeenCalled()
+    })
+
+    describe('falls back to the update when the direct role is unknown', () => {
+      it.each([
+        ['no Repository source', [source('Team', 'custom-role')]],
+        ['conflicting Repository sources', [source('Repository', 'custom-role'), source('Repository', 'admin')]]
+      ])('%s', async (_, sources) => {
+        const plugin = configure([{ username: 'alice', permission: 'custom-role' }])
+        github.rest.repos.listCollaborators.mockResolvedValueOnce({ data: [collaborator('alice')] })
+        github.graphql.mockResolvedValueOnce(page([edge('alice', ...sources)]))
+        await plugin.sync()
+        expect(github.rest.repos.addCollaborator).toHaveBeenCalledWith({ owner: 'bkeepers', repo: 'test', username: 'alice', permission: 'custom-role' })
+      })
+
+      it('collaborator missing from the GraphQL result', async () => {
+        const plugin = configure([{ username: 'alice', permission: 'push' }])
+        github.rest.repos.listCollaborators.mockResolvedValueOnce({ data: [collaborator('alice')] })
+        github.graphql.mockResolvedValueOnce(page([]))
+        await plugin.sync()
+        expect(github.rest.repos.addCollaborator).toHaveBeenCalledWith({ owner: 'bkeepers', repo: 'test', username: 'alice', permission: 'push' })
+      })
+
+      it('GraphQL query fails, so effective permissions are compared', async () => {
+        const plugin = configure([{ username: 'alice', permission: 'custom-role' }, { username: 'bob', permission: 'push' }])
+        github.rest.repos.listCollaborators.mockResolvedValueOnce({ data: [collaborator('alice'), collaborator('bob')] })
+        github.graphql.mockRejectedValueOnce(new Error('Forbidden'))
+        await plugin.sync()
+        expect(github.rest.repos.addCollaborator).toHaveBeenCalledTimes(1)
+        expect(github.rest.repos.addCollaborator).toHaveBeenCalledWith({ owner: 'bkeepers', repo: 'test', username: 'alice', permission: 'custom-role' })
+      })
+    })
+  })
 })
