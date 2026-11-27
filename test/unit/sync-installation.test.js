@@ -28,7 +28,7 @@ describe('syncInstallation', () => {
   beforeEach(() => {
     jest.resetModules()
     process.env = { ...originalEnv }
-    for (const key of ['GH_ORG', 'GH_ENTERPRISE', 'CRON', 'ADMIN_REPO', 'CONFIG_PATH', 'SETTINGS_FILE_PATH']) {
+    for (const key of ['GH_ORG', 'GH_ENTERPRISE', 'CRON', 'FULL_SYNC_NOP', 'ADMIN_REPO', 'CONFIG_PATH', 'SETTINGS_FILE_PATH']) {
       delete process.env[key]
     }
     process.env.DEPLOYMENT_CONFIG_FILE = path.join(__dirname, 'no-such-deployment-settings.yml')
@@ -238,6 +238,28 @@ describe('syncInstallation', () => {
     syncAll.mockResolvedValue(result)
 
     await expect(require('node-cron').schedule.mock.calls[0][1]()).resolves.toEqual({ results: [result], errors: [] })
+  })
+
+  it('runs the scheduled sync in NOP mode when FULL_SYNC_NOP is true', async () => {
+    process.env.CRON = '* * * * *'
+    process.env.FULL_SYNC_NOP = 'true'
+    const selected = installation(2, 'my-org')
+    await load('my-org', [selected])
+
+    await require('node-cron').schedule.mock.calls[0][1]()
+
+    expectSync(selected, true)
+  })
+
+  it.each([undefined, '', 'false', 'TRUE', '1'])('runs the scheduled sync for real when FULL_SYNC_NOP is %p', async value => {
+    process.env.CRON = '* * * * *'
+    if (value !== undefined) process.env.FULL_SYNC_NOP = value
+    const selected = installation(2, 'my-org')
+    await load('my-org', [selected])
+
+    await require('node-cron').schedule.mock.calls[0][1]()
+
+    expectSync(selected, false)
   })
 
   it('reports a failed execution through the real node-cron task lifecycle', async () => {
