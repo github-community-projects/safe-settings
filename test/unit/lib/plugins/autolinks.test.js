@@ -145,5 +145,47 @@ describe('Autolinks', () => {
         expect(github.rest.repos.createAutolink).toHaveBeenCalledTimes(5)
       })
     })
+
+    it('updates an autolink when only url_template changes', () => {
+      const plugin = configure([
+        { key_prefix: 'SAME-', url_template: 'https://new-url/<num>' }
+      ])
+
+      github.rest.repos.listAutolinks.mockResolvedValueOnce({
+        data: [
+          { id: '1', key_prefix: 'SAME-', url_template: 'https://old-url/<num>', is_alphanumeric: true }
+        ]
+      })
+
+      return plugin.sync().then(() => {
+        expect(github.rest.repos.deleteAutolink).toHaveBeenCalledWith({
+          autolink_id: '1',
+          ...repo
+        })
+        expect(github.rest.repos.createAutolink).toHaveBeenCalledWith({
+          key_prefix: 'SAME-',
+          url_template: 'https://new-url/<num>',
+          is_alphanumeric: true,
+          ...repo
+        })
+      })
+    })
+
+    it('does not update an autolink when url_template is unchanged', () => {
+      const plugin = configure([
+        { key_prefix: 'SAME-', url_template: 'https://test/<num>' }
+      ])
+
+      github.rest.repos.listAutolinks.mockResolvedValueOnce({
+        data: [
+          { id: '1', key_prefix: 'SAME-', url_template: 'https://test/<num>', is_alphanumeric: true }
+        ]
+      })
+
+      return plugin.sync().then(() => {
+        expect(github.rest.repos.deleteAutolink).not.toHaveBeenCalled()
+        expect(github.rest.repos.createAutolink).not.toHaveBeenCalled()
+      })
+    })
   })
 })
