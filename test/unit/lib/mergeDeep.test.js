@@ -1055,6 +1055,12 @@ entries:
         ]
       },
       modifications: {
+        entries: [
+          {
+            key_prefix: 'ASDF-',
+            url_template: 'https://jira.company.com/browse/ASDF-<num>'
+          }
+        ]
       },
       deletions: {
         entries: [{
@@ -1076,6 +1082,90 @@ entries:
     const merged = mergeDeep.compareDeep(target, source)
     console.log(`diffs ${JSON.stringify(merged, null, 2)}`)
     expect(merged).toEqual(expected)
+  })
+
+  it('Autolinks detects a url_template-only change', () => {
+    const target = {
+      entries: [
+        { id: '1', key_prefix: 'ASDF-', url_template: 'https://old.company.com/browse/ASDF-<num>', is_alphanumeric: true }
+      ]
+    }
+    const source = {
+      entries: [
+        { key_prefix: 'ASDF-', url_template: 'https://jira.company.com/browse/ASDF-<num>' }
+      ]
+    }
+    const mergeDeep = new MergeDeep(log, jest.fn(), ['id', 'node_id', 'default', 'url'])
+    const merged = mergeDeep.compareDeep(target, source)
+
+    expect(merged).toEqual({
+      additions: {},
+      modifications: {
+        entries: [
+          {
+            key_prefix: 'ASDF-',
+            url_template: 'https://jira.company.com/browse/ASDF-<num>'
+          }
+        ]
+      },
+      deletions: {},
+      hasChanges: true
+    })
+  })
+
+  it('Autolinks reports no changes when url_template is unchanged', () => {
+    const target = {
+      entries: [
+        { id: '1', key_prefix: 'ASDF-', url_template: 'https://jira.company.com/browse/ASDF-<num>', is_alphanumeric: true }
+      ]
+    }
+    const source = {
+      entries: [
+        { key_prefix: 'ASDF-', url_template: 'https://jira.company.com/browse/ASDF-<num>' }
+      ]
+    }
+    const mergeDeep = new MergeDeep(log, jest.fn(), ['id', 'node_id', 'default', 'url'])
+
+    expect(mergeDeep.compareDeep(target, source)).toEqual({
+      additions: {},
+      modifications: {},
+      deletions: {},
+      hasChanges: false
+    })
+  })
+
+  it('Autolinks ignores API url fields', () => {
+    const target = {
+      entries: [
+        {
+          id: '1',
+          key_prefix: 'ASDF-',
+          url_template: 'https://jira.company.com/browse/ASDF-<num>',
+          url: 'https://api.github.com/repos/owner/repo/autolinks/1',
+          html_url: 'https://github.com/owner/repo/autolinks/1',
+          repository_url: 'https://api.github.com/repos/owner/repo'
+        }
+      ]
+    }
+    const source = {
+      entries: [
+        {
+          key_prefix: 'ASDF-',
+          url_template: 'https://jira.company.com/browse/ASDF-<num>',
+          url: 'https://api.github.com/repos/other/repo/autolinks/2',
+          html_url: 'https://github.com/other/repo/autolinks/2',
+          repository_url: 'https://api.github.com/repos/other/repo'
+        }
+      ]
+    }
+    const mergeDeep = new MergeDeep(log, jest.fn(), ['id', 'node_id', 'default', 'url'])
+
+    expect(mergeDeep.compareDeep(target, source)).toEqual({
+      additions: {},
+      modifications: {},
+      deletions: {},
+      hasChanges: false
+    })
   })
 
   it('CompareDeep does not mutate source object', () => {
